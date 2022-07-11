@@ -81,7 +81,7 @@ each of which has nested fields given below.
 | ---------- | ------------ | ----- | ----------- |
 | `Vinf` | $V_\infty$ | m/s | Main-stream velocity |
 | `Tc` | $T_\mathrm{c}$ | K | Coolant temperature |
-| `Tinf` | $T_\infty$ | K | Coolant temperature |
+| `Tinf` | $T_\infty$ | K | Main-stream temperature |
 | `D` | $D$ | m | Hole diameter |
 
 *Flow*
@@ -130,7 +130,7 @@ T = 300.
 P = 1e5
 fluid_name = "Air"
 # Constant
-Mair = CoolProp.PropSI("molar_mass", fluid_name)
+Mair = CoolProp.PropsSI("molar_mass", fluid_name)
 # Function of temperature and pressure
 cpair = CoolProp.PropsSI("Cp0mass", "T", T, "P", P, fluid_name)
 cvair = CoolProp.PropsSI("Cv0mass", "T", T, "P", P, fluid_name)
