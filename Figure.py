@@ -5,6 +5,8 @@ import itertools
 import numpy as np
 import CoolProp.CoolProp as CoolProp
 
+import util
+
 
 class Figure:
 
@@ -58,6 +60,9 @@ class Figure:
             self.__x_D = self.__figure_dict['distributions']['x_D']
             self.__eff = self.__figure_dict['distributions']['eff']
 
+            # Fix coordinate system origin at center of hole
+            if self.__is_x_origin_trailing_edge:
+                self.__x_D += util.trailing_edge_offset(self.__alpha, self.__psi, self.__Lpsi_D)
 
             # Fill out None values:
             M_coolant = CoolProp.PropsSI("molar_mass", self.__coolant)

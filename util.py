@@ -2,6 +2,7 @@
 
 import numpy as np
 
+
 def get_geometry(phi, psi, Lphi_D, Lpsi_D, alpha):
     """Evaluate geometric parameters from diffusion angles and lengths.
 
@@ -66,3 +67,37 @@ def get_geometry(phi, psi, Lphi_D, Lpsi_D, alpha):
     W_D = 1.0 + 2.0 * Lphi_D * tan_phi
 
     return AR, x_D_edge, W_D
+
+
+def trailing_edge_offset(alpha: float, psi: float, Lpsi_D: float) -> float:
+    """
+
+    Returns the horizontal distance of the trailing edge from the center of the hole
+
+    Parameters
+    ----------
+    alpha : float
+        Inclination angle [degrees]
+    psi : float
+        Forward divergence full angle [degrees]
+    Lpsi_D : float
+        Forward divergence length, normalised by hole diameter [-]
+
+    Returns
+    -------
+    offset_D: float
+        The horizontal distance between the trailing edge and the intersection of the horizontal plane
+    and the centerline of the hole, normalised by hole diameter [-]
+    """
+
+    sin_alpha = np.sin(np.radians(alpha))
+    tan_alpha = np.tan(np.radians(alpha))
+    tan_psi = np.tan(np.radians(psi))
+
+    # Distance between centerline and the theoretical edge of the hole if psi was 0
+    x1_D = 1 / (2 * sin_alpha)
+
+    # Distance between the actual trailing edge the theoretical edge of the hole if psi was 0
+    x2_D = (1 / (2 * tan_alpha) + Lpsi_D) * tan_psi * np.sin(np.radians(90 + psi)) / np.sin(np.radians(alpha - psi))
+    offset_D = x1_D + x2_D
+    return offset_D
