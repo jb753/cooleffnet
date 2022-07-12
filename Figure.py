@@ -136,61 +136,64 @@ class Figure:
 
     def get_velocity_ratio(self):
         """Returns the coolant to mainstream flow velocity ratio"""
-
-        # Check if iterable to allow for numpy arrays an others?
-        # Check if magic simplification exists with itertools (can convert to numpy array and go from there?)
-
         return self.__BR / self.__DR
-        # if type(self.__BR) is list:
-        #     if type(self.__DR) is list:
-        #         return [x / y for x, y in zip(self.__BR / self.__DR)]
-        #     else:
-        #         return [x / self.__DR for x in self.__BR]
-        # else:
-        #     if type(self.__DR) is list:
-        #         return [self.__BR / y for x, y in zip(self.__BR / self.__DR)]
-        #     else:
-        #         return self.__BR / self.__DR
 
-    def get_features(self):
-        """Returns a list of features ready to be used in the regression step"""
-        # Should VR be added as well?
-        return [self.get_reynolds(), self.get_mach()]
 
-    def get_labels(self):
-        """Returns a list of labels to be used in the regression step"""
-        return [self.__x_D, self.__eff]
+    def __get_single_feature_label_map(self, AR: float, W_D: float, Re: float, Ma: float, VR: float, x_D: np.ndarray,
+                                       eff: np.ndarray) -> list:
+        # Use list of features instead of parameters?
+        # AR, W_D, Re, Ma, VR should be a single value, while x_D and eff are ndarrays
+        if type(AR) is np.ndarray or \
+                type(W_D) is np.ndarray or \
+                type(Re) is np.ndarray or \
+                type(Ma) is np.ndarray or \
+                type(VR) is np.ndarray or \
+                type(x_D) is list or \
+                type(eff) is list:
+            raise ValueError("For a single feature label map, all features should be single values")
+        return [([AR, W_D, Re, Ma, VR, curr_x], curr_eff) for curr_x, curr_eff in zip(x_D, eff)]
+
+    def get_feature_label_maps(self):
+
+        AR, _, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
+        Re = self.get_reynolds()
+        Ma = self.get_mach()
+        VR = self.get_velocity_ratio()
+        x_D = self.__x_D
+        eff = self.__eff
+
+        # Keep x_D and eff at the end in any case
+        features = [AR, W_D, Re, Ma, VR, x_D, eff]
+        is_list = [False] * len(features)
+        is_list[:-2] = [type(x) is np.ndarray for x in features[:-2]]
+        is_list[-2:] = [type(x) is list for x in features[-2:]]
+
+        # Look up if there is a neater way of doing this, but for now it'll do
+        feat_label_map = []
+        if type(eff) is list or type(x_D) is list:
+            # List so, multiple result sets
+            length = len(features[next(i for i, x in enumerate(is_list) if x)])
+            for feature, is_a_list in zip(features, is_list):
+                if is_a_list and len(feature) != length:
+                    raise ValueError("Feature lists should have equal length")
+
+            for i in range(length):
+                next_feats = [feat[i] if is_list[j] else feat for j, feat in enumerate(features)]
+                feat_label_map.append(self.__get_single_feature_label_map(*next_feats))
+        else:
+            # TODO: Add more checks
+            # Maybe move this to get_single_feature_label_map()?
+            # Sanity check:
+            if len(eff) != len(x_D):
+                raise ValueError("Arrays of x and y coordinates should have same length")
+            feat_label_map = self.__get_single_feature_label_map(AR, W_D, Re, Ma, VR, x_D, eff)
+
+        return feat_label_map
 
     def get_reynolds(self):
         """Returns the coolant Reynolds number"""
-        # if type(self.__BR) is list:
-        #     return [self.__Reinf * BR/ self.__viscosity_ratio() for BR in self.__BR]
         return self.__Reinf * self.__BR / self.__viscosity_ratio()
 
     def get_mach(self):
         """Returns the coolant Mach number"""
-        # VR = self.get_velocity_ratio()
-        # if type(VR) is list:
-        #     return [self.__Mainf * vr / self.__speed_of_sound_ratio() for vr in VR]
         return self.__Mainf * self.get_velocity_ratio() / self.__speed_of_sound_ratio()
-
-
-if __name__ == "__main__":
-    data_files = [path for path in Path("data").iterdir() if path.is_file() and path.suffix == ".json"]
-
-    # TODO: Add proper testing
-    data_set_no = 0
-    for file in data_files:
-        # FIXME: Either make object more versatile or change McNamara datasets
-        if "McNamara" in file.name:
-            continue
-        test = Figure(file)
-        print(test.get_velocity_ratio())
-        print(test.get_features())
-        print(test.get_reynolds())
-        print(test.get_mach())
-        if type(test.get_reynolds()) is float:
-            data_set_no += 1
-        else:
-            data_set_no += len(test.get_reynolds())
-
