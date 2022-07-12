@@ -90,6 +90,9 @@ def trailing_edge_offset(alpha: float, psi: float, Lpsi_D: float) -> float:
     and the centerline of the hole, normalised by hole diameter [-]
     """
 
+    # This is a completely unnecessary reimplementation of x_D_edge from get_geometry() because
+    # I didn't notice it existed and assumed the third return value was Lphi*/D
+    # Remarkably though, the two are equal save for a 1e-15 order difference, probably due to floating point arithmetic
     sin_alpha = np.sin(np.radians(alpha))
     tan_alpha = np.tan(np.radians(alpha))
     tan_psi = np.tan(np.radians(psi))

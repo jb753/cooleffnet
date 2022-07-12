@@ -22,7 +22,12 @@ class Figure:
             for top_key in self.__figure_dict.keys():
                 for key, value in self.__figure_dict[top_key].items():
                     if type(value) is list and type(value) is not str:
-                        self.__figure_dict[top_key][key] = np.asarray(self.__figure_dict[top_key][key])
+                        if type(value[0]) is list:
+                            # Assume that if first element is a list, then it's a list of lists
+                            # If list of lists, turn it to a list of NumPy arrays
+                            self.__figure_dict[top_key][key] = [np.asarray(x) for x in value]
+                        else:
+                            self.__figure_dict[top_key][key] = np.asarray(self.__figure_dict[top_key][key])
 
             self.__is_single_hole = self.__figure_dict['geometry']['is_single_hole']
             self.__alpha = self.__figure_dict['geometry']['alpha']
@@ -62,7 +67,14 @@ class Figure:
 
             # Fix coordinate system origin at center of hole
             if self.__is_x_origin_trailing_edge:
-                self.__x_D += util.trailing_edge_offset(self.__alpha, self.__psi, self.__Lpsi_D)
+                offset = util.trailing_edge_offset(self.__alpha, self.__psi, self.__Lpsi_D)
+                if type(offset) is np.ndarray:
+                    self.__x_D = [curr_x + curr_offset for curr_x, curr_offset in zip(self.__x_D, offset)]
+                else:
+                    if type(self.__x_D) is np.ndarray:
+                        self.__x_D += offset
+                    elif type(self.__x_D) is list:
+                        self.__x_D = [x + offset for x in self.__x_D]
 
             # Fill out None values:
             M_coolant = CoolProp.PropsSI("molar_mass", self.__coolant)
