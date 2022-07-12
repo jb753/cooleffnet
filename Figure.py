@@ -12,11 +12,9 @@ class Figure:
 
     def __init__(self, file: Path):
         """Initialises a Figure object from a JSON figure file"""
-        #print(file.name)
 
         with open(file) as figure_file:
             self.__figure_dict = json.load(figure_file)
-            #print(self.__figure_dict)
 
             # Convert every list to a numpy array
             for top_key in self.__figure_dict.keys():
@@ -77,10 +75,14 @@ class Figure:
                         self.__x_D = [x + offset for x in self.__x_D]
 
             # Fill out None values:
-            M_coolant = CoolProp.PropsSI("molar_mass", self.__coolant)
-            M_inf = CoolProp.PropsSI("molar_mass", self.__mainstream)
+            self.__Mc = CoolProp.PropsSI("molar_mass", self.__coolant)
+            self.__Minf = CoolProp.PropsSI("molar_mass", self.__mainstream)
 
-            self.__MR = M_coolant / M_inf # Molar mass ratio
+            self.__MR = self.__Mc / self.__Minf  # Molar mass ratio
+            # Apparently universal gas constant can be different for different fluids in CoolProp
+            # Not very universal anymore, now is it?
+            self.__Rc = CoolProp.PropsSI("gas_constant", self.__coolant) / self.__Mc
+            self.__Rinf = CoolProp.PropsSI("gas_constant", self.__mainstream) / self.__Minf
 
             # Assuming ideal gas
             self.__TR = self.__MR / self.__DR # Coolant to mainstream temperature ratio
@@ -89,33 +91,48 @@ class Figure:
             if self.__Tinf is None:
                 self.__Tinf = self.__Tc / self.__TR
 
-            # FIXME: Still need a proper pressure value from somewhere...
-            self.__p = 1e5
-            a_mainstream = CoolProp.PropsSI("speed_of_sound", "T", self.__Tinf, "P", self.__p, self.__mainstream)
+            # Ideal gas, hence Cp is independent of pressure --> use atmospheric pressure
+            self.__Cpc = CoolProp.PropsSI("Cp0mass", "T", self.__Tc, "P", 1e5, self.__coolant)
+            self.__Cpinf = CoolProp.PropsSI("Cp0mass", "T", self.__Tinf, "P", 1e5, self.__mainstream)
+
+            self.__Gammac = self.__Cpc / (self.__Cpc - self.__Rc)
+            self.__Gammainf = self.__Cpinf / (self.__Cpinf - self.__Rinf)
+
+            self.__Ac = np.sqrt(self.__Gammac * self.__Rc * self.__Tc)
+            self.__Ainf = np.sqrt(self.__Gammainf * self.__Rinf * self.__Tinf)
+
             if self.__Mainf is None:
-                self.__Mainf = self.__Vinf / a_mainstream
+                self.__Mainf = self.__Vinf / self.__Ainf
 
             if self.__Vinf is None:
-                self.__Vinf = self.__Mainf * a_mainstream
+                self.__Vinf = self.__Mainf * self.__Ainf
+
+            # Vinf now definitely set
+
+            # Assuming viscosity is mostly a function of temperature --> use atmospheric pressure
+            mu_inf_temp = CoolProp.PropsSI("viscosity", "T", self.__Tinf, "P", 1e5, self.__mainstream)
+            self.__rhoinf = self.__Reinf * mu_inf_temp / (self.__Vinf * self.__D)
+
+            # Now state fixed with rho
+            # Do 4 extra iteration to be safer
+            # By checking manually, this should be more than enough
+            for i in range(1, 4):
+                mu_inf_temp = CoolProp.PropsSI("viscosity", "T", self.__Tinf, "D", self.__rhoinf, self.__mainstream)
+                self.__rhoinf = self.__Reinf * mu_inf_temp / (self.__Vinf * self.__D)
+            self.__rhoc = self.__DR * self.__rhoinf
 
     def __viscosity_ratio(self):
         """Returns the coolant to mainstream flow kinematic viscosity ratio"""
 
-        p = 1e5 # ***PLACEHOLDER***
-
-        mu_coolant = CoolProp.PropsSI("viscosity", "T", self.__Tc, "P", p, self.__coolant)
-        mu_mainstream = CoolProp.PropsSI("viscosity", "T", self.__Tinf, "P", p, self.__mainstream)
+        mu_coolant = CoolProp.PropsSI("viscosity", "T", self.__Tc, "D", self.__rhoc, self.__coolant)
+        mu_mainstream = CoolProp.PropsSI("viscosity", "T", self.__Tinf, "D", self.__rhoinf, self.__mainstream)
 
         return mu_coolant / mu_mainstream
 
     def __speed_of_sound_ratio(self):
         """Returns the coolant to mainstream speed of sound ratio"""
-        p = 1e5 # ***PLACEHOLDER***
-
-        a_coolant = CoolProp.PropsSI("speed_of_sound", "T", self.__Tc, "P", p, self.__coolant)
-        a_mainstream = CoolProp.PropsSI("speed_of_sound", "T", self.__Tinf, "P", p, self.__mainstream)
-
-        return a_coolant / a_mainstream
+        # TODO: Should be probably field if Ac and Ainf are fields
+        return self.__Ac / self.__Ainf
 
     def get_velocity_ratio(self):
         """Returns the coolant to mainstream flow velocity ratio"""
