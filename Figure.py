@@ -151,7 +151,7 @@ class Figure:
                 type(x_D) is list or \
                 type(eff) is list:
             raise ValueError("For a single feature label map, all features should be single values")
-        return [([AR, W_D, Re, Ma, VR, curr_x], curr_eff) for curr_x, curr_eff in zip(x_D, eff)]
+        return np.asarray([[AR, W_D, Re, Ma, VR, curr_x] for curr_x in x_D]), eff
 
     def get_feature_label_maps(self):
 
@@ -169,7 +169,7 @@ class Figure:
         is_list[-2:] = [type(x) is list for x in features[-2:]]
 
         # Look up if there is a neater way of doing this, but for now it'll do
-        feat_label_map = []
+        feat_label_map = ([], [])
         if type(eff) is list or type(x_D) is list:
             # List so, multiple result sets
             length = len(features[next(i for i, x in enumerate(is_list) if x)])
@@ -179,7 +179,9 @@ class Figure:
 
             for i in range(length):
                 next_feats = [feat[i] if is_list[j] else feat for j, feat in enumerate(features)]
-                feat_label_map.append(self.__get_single_feature_label_map(*next_feats))
+                single_map_feats, single_map_labels = self.__get_single_feature_label_map(*next_feats)
+                feat_label_map[0].append(single_map_feats)
+                feat_label_map[1].append(single_map_labels)
         else:
             # TODO: Add more checks
             # Maybe move this to get_single_feature_label_map()?
