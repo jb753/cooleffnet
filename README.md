@@ -19,6 +19,9 @@ measurements, and associated documentation.
   of machine learning library. We are most interested in Gaussian processes but
   could try other methods as well. Lots of tutorial/examples available
   elsewhere.
+* *Bayesian ensemble neural networks*
+    - [Pearce et al. (2018)](https://doi.org/10.48550/arXiv.1811.12188): Theoretical background to the method.
+    - [Sengupta et al. (2021)](https://doi.org/10.1115/1.4049762): Application with code on his GitHub.
 
 ## Geometry definitions
 
