@@ -22,6 +22,9 @@ measurements, and associated documentation.
 * *Bayesian ensemble neural networks*
     - [Pearce et al. (2018)](https://doi.org/10.48550/arXiv.1811.12188): Theoretical background to the method.
     - [Sengupta et al. (2021)](https://doi.org/10.1115/1.4049762): Application with code on his GitHub.
+* *Correlations for film effectiveness* with implementations in `correlations.py`
+    - [Baldauf et al.](https://doi.org/10.1115/1.1504443): cylindrical cooling holes.
+    - [Colban et al. (2011)](https://doi.org/10.1115/1.4002064): shaped cooling holes only.
 
 ## Geometry definitions
 
