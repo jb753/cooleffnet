@@ -1,4 +1,6 @@
+import itertools
 import json
+import random
 from pathlib import Path
 from typing import Sequence
 
@@ -6,6 +8,131 @@ import numpy as np
 import CoolProp.CoolProp as CoolProp
 
 import util
+
+
+class CoolingDatabase:
+
+    def __init__(self, database_dir: Path, verbose: bool=False):
+        self.__datafiles = [f for f in database_dir.iterdir() if f.is_file() and f.suffix == ".json"]
+        self.__verbose = verbose
+        self.__dataset_generated = False
+
+        self.__training_feats = None
+        self.__training_labels = None
+        self.__training_files = None
+        self.__test_feats = None
+        self.__test_labels = None
+        self.__test_files = None
+
+    def generate_dataset(self, training_min: int, test_min: int, unique_params: bool = False, shuffle: bool = True,
+                         flow_param_list: Sequence[str] = None):
+        if flow_param_list is None:
+            flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
+
+        if self.__verbose:
+            print("Generating dataset...")
+            print(f"Wanted features: {Figure.feature_names(flow_param_list)}")
+
+        self.__training_feats = []
+        self.__training_labels = []
+        self.__training_files = []
+        self.__test_feats = []
+        self.__test_labels = []
+        self.__test_files = []
+
+        file_list = self.__datafiles.copy()
+        if shuffle:
+            random.shuffle(file_list)
+
+        unique_vals = set()
+        train_count = 0
+        test_count = 0
+        for file in file_list:
+            fig = Figure(file)
+            feats, labels = fig.get_feature_label_maps(flow_param_list)
+            no_data_points = sum(len(x) for x in feats)
+
+            if unique_params:
+                for feat, label in zip(feats, labels):
+                    curve_length = len(feat)
+                    # Hope flow params don't change with x/D
+                    # Which should be the case for the database
+                    # -1 because we exclude x/D
+                    if tuple(feat[0][:-1]) not in unique_vals:
+                        unique_vals.add(tuple(feat[0]))
+                        if train_count < training_min:
+                            self.__training_feats.append(feat)
+                            self.__training_labels.append(label)
+                            train_count += curve_length
+                        elif test_count < test_min:
+                            self.__test_feats.append(feat)
+                            self.__test_labels.append(label)
+                            test_count += curve_length
+            else:
+                if train_count < training_min:
+                    self.__training_feats += feats
+                    self.__training_labels += labels
+                    train_count += no_data_points
+                    self.__training_files.append(file)
+                elif test_count < test_min:
+                    self.__test_feats += feats
+                    self.__test_labels += labels
+                    self.__test_files.append(file)
+                    test_count += no_data_points
+
+        if self.__verbose:
+            print(f"Files loaded: {len(self.__training_files) + len(self.__test_files)}")
+            print(f"Training examples: {train_count}, test examples: {test_count}")
+
+            training_filenames = [f.name for f in self.__training_files]
+            test_filenames = [f.name for f in self.__test_files]
+            training_filenames = sorted(training_filenames)
+            test_filenames = sorted(test_filenames)
+
+            print(f"Training files                Test files")
+            for train_file, test_file in itertools.zip_longest(training_filenames, test_filenames, fillvalue=""):
+                print(f"{train_file:<30}{test_file:<30}")
+        self.__dataset_generated = True
+
+    # TODO: Rethink this, are there options for making it stateless?
+    def get_dataset(self, test: bool = False, normalize_features = False, normalize_labels=False,
+                     zero_mean_features=False, zero_mean_labels=False, return_stats: bool = False):
+        if not self.__dataset_generated:
+            raise RuntimeError("Requested training dataset without calling generate_dataset() before")
+
+        feat_matrix = np.concatenate(self.__training_feats) if not test else np.concatenate(self.__test_feats)
+        label_matrix = np.concatenate(self.__training_labels) if not test else np.concatenate(self.__test_labels)
+        label_matrix = np.atleast_2d(label_matrix).T
+
+        feat_means, feat_stdevs = np.mean(feat_matrix, axis=0), np.std(feat_matrix, axis=0)
+        label_means, label_stdevs = np.mean(label_matrix, axis=0), np.std(label_matrix, axis=0)
+        if zero_mean_features or normalize_features:
+            feat_matrix -= feat_means
+        if zero_mean_labels or normalize_labels:
+            label_matrix -= label_means
+
+        if normalize_features:
+            feat_matrix /= feat_stdevs
+        if normalize_labels:
+            label_matrix /= label_stdevs
+
+        # stats = feat_means, feat_stdevs, label_means, label_stdevs
+        stats = {
+            'feat_means': feat_means,
+            'feat_stdevs': feat_stdevs,
+            'label_means': label_means,
+            'label_stdevs': label_stdevs
+        }
+
+        if return_stats:
+            return feat_matrix, label_matrix, stats
+        else:
+            return feat_matrix, label_matrix
+
+    def get_files(self, test: bool = False):
+        if not self.__dataset_generated:
+            raise RuntimeError("Requested training dataset without calling generate_dataset() before")
+        return self.__test_files if test else self.__training_files
 
 
 class Figure:
@@ -264,21 +391,21 @@ class Figure:
         if flow_param_list is None:
             return ["Area ratio", "Coverage ratio", "Reynolds number", "Mach number", "Velocity ratio", "Horizontal position over diameter"]
         else:
-            if any(param_string.lower() in flow_param_list for param_string in ["ar", "area ratio"]):
+            if any(param_string.lower() in ["ar", "area ratio"] for param_string in flow_param_list ):
                 name_list.append("Area ratio")
-            if any(param_string.lower() in flow_param_list for param_string in ["w/d", "w_d", "coverage ratio"]):
+            if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list ):
                 name_list.append("Coverage ratio")
-            if any(param_string.lower() in flow_param_list for param_string in ["re", "reynolds", "reynolds number"]):
+            if any(param_string.lower() in ["re", "reynolds", "reynolds number"] for param_string in flow_param_list ):
                 name_list.append("Reynolds number")
-            if any(param_string.lower() in flow_param_list for param_string in ["ma", "mach", "mach number"]):
+            if any(param_string.lower() in ["ma", "mach", "mach number"] for param_string in flow_param_list ):
                 name_list.append("Mach number")
-            if any(param_string.lower() in flow_param_list for param_string in ["vr", "velocity ratio"]):
+            if any(param_string.lower() in ["vr", "velocity ratio"] for param_string in flow_param_list ):
                 name_list.append("Velocity ratio")
-            if any(param_string.lower() in flow_param_list for param_string in ["br", "blowing ratio"]):
+            if any(param_string.lower() in ["br", "blowing ratio"] for param_string in flow_param_list ):
                 name_list.append("Blowing ratio")
-            if any(param_string.lower() in flow_param_list for param_string in ["dr", "density ratio"]):
+            if any(param_string.lower() in ["dr", "density ratio"] for param_string in flow_param_list ):
                 name_list.append("Density ratio")
-            if any(param_string.lower() in flow_param_list for param_string in ["ir", "momentum flux ratio"]):
+            if any(param_string.lower() in ["ir", "momentum flux ratio"] for param_string in flow_param_list ):
                 name_list.append("Momentum flux ratio")
 
             name_list.append("Horizontal position over diameter")

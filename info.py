@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from Figure import Figure
+from fcdb import Figure
 
 if __name__ == "__main__":
     data_files = [path for path in Path("data").iterdir() if path.is_file() and path.suffix == ".json"]
