@@ -1,6 +1,7 @@
 """General utility functions."""
 
 import numpy as np
+import tensorflow as tf
 
 
 def get_geometry(phi, psi, Lphi_D, Lpsi_D, alpha):
@@ -104,3 +105,31 @@ def trailing_edge_offset(alpha: float, psi: float, Lpsi_D: float) -> float:
     x2_D = (1 / (2 * tan_alpha) + Lpsi_D) * tan_psi * np.sin(np.radians(90 + psi)) / np.sin(np.radians(alpha - psi))
     offset_D = x1_D + x2_D
     return offset_D
+
+
+def run_adam(model, train_dataset, minibatch_size, iterations, print_iter = True):
+    """
+    Utility function running the Adam optimizer
+
+    :param model: GPflow model
+    :param minibatch_size: size of minibatches
+    :param iterations: number of iterations
+    """
+    # Create an Adam Optimizer action
+    logf = []
+    train_iter = iter(train_dataset.batch(minibatch_size))
+    training_loss = model.training_loss_closure(train_iter, compile=True)
+    optimizer = tf.optimizers.Adam()
+
+    @tf.function
+    def optimization_step():
+        optimizer.minimize(training_loss, model.trainable_variables)
+
+    for step in range(iterations):
+        optimization_step()
+        if step % 100 == 0:
+            elbo = -training_loss().numpy()
+            if print_iter:
+                print(f"Step #{step:6}: ELBO = {elbo:.5f}")
+            logf.append(elbo)
+    return logf
