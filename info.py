@@ -10,17 +10,10 @@ if __name__ == "__main__":
     example_no = 0
     for file in data_files:
         test = Figure(file)
-        print(test.get_velocity_ratio())
-        print(test.get_feature_label_maps())
-        print(test.get_reynolds())
-        print(test.get_mach())
         map = test.get_feature_label_maps()
 
-        example_no += sum(len(x) for x in map)
-
-        if type(test.get_reynolds()) is float:
-            data_set_no += 1
-        else:
-            data_set_no += len(test.get_reynolds())
+        for i, (feat, label) in enumerate(zip(map[0], map[1])):
+            example_no += len(feat)
+            print(f"File: {file.name:30}/{i + 1:02}, length: {len(feat):10}")
 
     print(f"No of examples: {example_no}")
