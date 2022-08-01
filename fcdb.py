@@ -2,7 +2,7 @@ import itertools
 import json
 import random
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import numpy as np
 import CoolProp.CoolProp as CoolProp
@@ -23,6 +23,9 @@ class CoolingDatabase:
         self.__test_feats = None
         self.__test_labels = None
         self.__test_files = None
+
+        self.__training_total = 0
+        self.__test_total = 0
 
     def generate_dataset(self, training_min: int, test_min: int, unique_params: bool = False, shuffle: bool = True,
                          flow_param_list: Sequence[str] = None):
@@ -80,6 +83,9 @@ class CoolingDatabase:
                     self.__test_files.append(file)
                     test_count += no_data_points
 
+        self.__training_total = train_count
+        self.__test_total = test_count
+
         if self.__verbose:
             print(f"Files loaded: {len(self.__training_files) + len(self.__test_files)}")
             print(f"Training examples: {train_count}, test examples: {test_count}")
@@ -93,6 +99,73 @@ class CoolingDatabase:
             for train_file, test_file in itertools.zip_longest(training_filenames, test_filenames, fillvalue=""):
                 print(f"{train_file:<30}{test_file:<30}")
         self.__dataset_generated = True
+
+    def split_training(self, no_splits: int) -> Tuple[Sequence[np.ndarray], Sequence[np.ndarray]]:
+        if not self.__dataset_generated:
+            raise RuntimeError("Requested training dataset without calling generate_dataset() before")
+        target = self.__training_total // no_splits
+        feat_sets, label_sets = [], []
+
+        # To alternate between under and overshooting the target
+        # Makes for more equal splits
+        overfill = True
+        curr_feat_set, curr_label_set = [], []
+        for feat, label in zip(self.__training_feats, self.__training_labels):
+            no_datapoints = len(feat)
+            curr_feat_len = sum(len(x) for x in curr_feat_set)
+            if curr_feat_len < target:
+                if not overfill and (curr_feat_len + no_datapoints) > target:
+                    feat_sets.append(curr_feat_set)
+                    label_sets.append(curr_label_set)
+                    curr_feat_set = [feat]
+                    curr_label_set = [label]
+                    overfill = not overfill
+                else:
+                    curr_feat_set.append(feat)
+                    curr_label_set.append(label)
+            else:
+                feat_sets.append(curr_feat_set)
+                label_sets.append(curr_label_set)
+                curr_feat_set = [feat]
+                curr_label_set = [label]
+                overfill = not overfill
+
+        feat_sets.append(curr_feat_set)
+        label_sets.append(curr_label_set)
+
+        feat_sets = [np.concatenate(x) for x in feat_sets]
+        label_sets = [np.atleast_2d(np.concatenate(x)).T for x in label_sets]
+
+        return feat_sets, label_sets
+
+    def get_crossvalidation_sets(self, no_splits: int = 5):
+        if not self.__dataset_generated:
+            raise RuntimeError("Requested cross-validation dataset without calling generate_dataset() before")
+        feat_splits, label_splits = self.split_training(no_splits)
+
+        cv_train_feats, cv_train_labels = [], []
+        cv_test_feats, cv_test_labels = [], []
+
+        temp_feats, temp_labels = [], []
+        # i selects CV test set
+        # j iterates through all splits
+        for i in range(no_splits):
+            for j in range(no_splits):
+                if i == j:
+                    cv_test_feats.append(feat_splits[i])
+                    cv_test_labels.append(label_splits[i])
+                else:
+                    temp_feats.append(feat_splits[j])
+                    temp_labels.append(label_splits[j])
+
+            cv_train_feats.append(np.concatenate(temp_feats))
+            cv_train_labels.append(np.concatenate(temp_labels))
+            temp_feats = []
+            temp_labels = []
+
+        return (cv_train_feats, cv_train_labels), (cv_test_feats, cv_test_labels)
+
+
 
     # TODO: Rethink this, are there options for making it stateless?
     def get_dataset(self, test: bool = False, normalize_features = False, normalize_labels=False,
@@ -268,7 +341,7 @@ class Figure:
 
     def __get_single_feature_label_map(self, flow_params: Sequence[float],
                                        x_D: np.ndarray,
-                                       eff: np.ndarray) -> tuple[Sequence[float], Sequence[float]]:
+                                       eff: np.ndarray) -> Tuple[Sequence[float], Sequence[float]]:
         # Use list of features instead of parameters?
         # Flow parameters should be a single value, while x_D and eff are ndarrays
         if any(type(flow_param) is np.ndarray or type(flow_param) is list for flow_param in flow_params) or \
