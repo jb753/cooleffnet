@@ -100,7 +100,7 @@ class CoolingDatabase:
                 print(f"{train_file:<30}{test_file:<30}")
         self.__dataset_generated = True
 
-    def split_training(self, no_splits: int) -> Tuple[Sequence[np.ndarray], Sequence[np.ndarray]]:
+    def split_training(self, no_splits: int, padding: str = None) -> Tuple[Sequence[np.ndarray], Sequence[np.ndarray]]:
         if not self.__dataset_generated:
             raise RuntimeError("Requested training dataset without calling generate_dataset() before")
         target = self.__training_total // no_splits
@@ -133,15 +133,33 @@ class CoolingDatabase:
         feat_sets.append(curr_feat_set)
         label_sets.append(curr_label_set)
 
+        # FIXME: Potentially throwing away data...
+        feat_sets = feat_sets[:no_splits]
+        label_sets = label_sets[:no_splits]
+
+        lengths = [sum(len(y) for y in x) for x in feat_sets]
+        if padding == "max":
+            largest_set_size = max(lengths)
+            for feat_set, label_set, length in zip(feat_sets, label_sets, lengths):
+                padding_length = largest_set_size - length
+                if padding_length > 0:
+                    feat_set.append(np.ones((padding_length, feat_set[0].shape[-1])))
+                    label_set.append(np.zeros(padding_length))
+
         feat_sets = [np.concatenate(x) for x in feat_sets]
         label_sets = [np.atleast_2d(np.concatenate(x)).T for x in label_sets]
 
+        if padding == "min":
+            min_set_size = min(lengths)
+            feat_sets = [x[:min_set_size] for x in feat_sets]
+            label_sets = [x[:min_set_size] for x in label_sets]
+
         return feat_sets, label_sets
 
-    def get_crossvalidation_sets(self, no_splits: int = 5):
+    def get_crossvalidation_sets(self, no_splits: int = 5, padding: str = None):
         if not self.__dataset_generated:
             raise RuntimeError("Requested cross-validation dataset without calling generate_dataset() before")
-        feat_splits, label_splits = self.split_training(no_splits)
+        feat_splits, label_splits = self.split_training(no_splits, padding)
 
         cv_train_feats, cv_train_labels = [], []
         cv_test_feats, cv_test_labels = [], []

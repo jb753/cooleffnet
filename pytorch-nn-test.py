@@ -15,10 +15,25 @@ def remove_minmax(array):
     a_masked = np.ma.masked_array(array, mask=mask)
     return a_masked
 
+class CustomStandardScaler():
+    def fit(self, x: torch.Tensor):
+        self.mean = x.mean(dim=1, keepdim=True)
+        self.std = x.std(dim=1, unbiased=False, keepdim=True)
+
+    def transform(self, x):
+        x -= self.mean
+        x /= (self.std + 1e-7)
+        return x
+
+    def fit_transform(self, x):
+        self.fit(x)
+        return self.transform(x)
+
+
 class CoolingDataset(Dataset):
-    def __init__(self, feats, labels, transform=None, target_transform=None, device="cpu"):
-        self.feats = torch.from_numpy(feats).to(device)
-        self.labels = torch.from_numpy(labels).to(device)
+    def __init__(self, feats, labels, transform=None, target_transform=None):
+        self.feats = feats
+        self.labels = labels
         self.transform = transform
         self.target_transform = target_transform
 
@@ -35,24 +50,33 @@ class CoolingDataset(Dataset):
         return feat, label
 
 
-def train_loop(dataloader, model, loss_fn, opt, verbose=False):
-    size = len(dataloader.dataset)
+def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
+    if len(features) != len(labels):
+        raise ValueError("Features and labels must have same length")
+    size = len(features)
     log = []
-    for batch, (X, y) in enumerate(dataloader):
-        # Predict and calc. loss
-        pred = model(X.float())
-        loss = loss_fn(pred, y.float())
+    no_batches = size // batchsize + 1
+    rand_indices = torch.randperm(size)
+    for i in range(no_batches):
+        batch_start = i * batchsize
+        batch_end = min((i + 1) * batchsize,size)
+        rand_indices = torch.randperm(size)
+        if batch_end != batch_start:
+            X = features[rand_indices[batch_start:batch_end]]
+            y = labels[rand_indices[batch_start:batch_end]]
+            pred = model(X)
+            loss = loss_fn(pred, y)
 
-        # Backpropagation
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+            # Backpropagation
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
 
-        if batch % 10 == 0:
-            loss, current = loss.item(), batch * len(X)
-            if verbose:
-                print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
-            log.append(loss)
+            if i % 10 == 0:
+                loss, current = loss.item(), i * len(X)
+                if verbose:
+                    print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
+                log.append(loss)
 
     return log
 
@@ -62,7 +86,7 @@ class NeuralNetwork(torch.nn.Module):
         super(NeuralNetwork, self).__init__()
         self.stack = torch.nn.Sequential(
             torch.nn.Linear(in_feats, no_nodes),
-            # torch.nn.ReLU(),
+            torch.nn.ReLU(),
             # torch.nn.Dropout(0.2),
             # torch.nn.Linear(no_nodes,  no_nodes),
             # torch.nn.ReLU(),
@@ -88,9 +112,20 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train neural network on turbine film cooling database")
     parser.add_argument('-d', '--directory', type=str, required=False, help='Database directory', default="data")
+    parser.add_argument("--super", action="store_true", help="To run on a supercomputer")
+    parser.add_argument("--cpu", action="store_true", help="Force running on CPU")
+
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if args.super:
+        print("Running in supercomputer mode")
+
+    if args.cpu:
+        print("Forcing to run on CPU")
+        device = "cpu"
+
     print(f"Using {device} device")
 
 
@@ -102,78 +137,83 @@ if __name__ == "__main__":
     training_files = db.get_files()
     test_files = db.get_files(test=True)
 
-    # split_feats, split_labels = db.split_training(5)
-    (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(10)
+    # split_feats, split_labels = db.split_training(5, pad_to_max=True)
+    (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(5, padding="max")
 
+    cv_training_feats = np.stack(cv_training_feats)
+    cv_training_labels = np.stack(cv_training_labels)
+    cv_test_feats = np.stack(cv_test_feats)
+    cv_test_labels = np.stack(cv_test_labels)
+
+    # Move everything to GPU if possible
+    cv_training_feats = torch.from_numpy(cv_training_feats).float().to(device)
+    cv_training_labels = torch.from_numpy(cv_training_labels).float().to(device)
+    cv_test_feats = torch.from_numpy(cv_test_feats).float().to(device)
+    cv_test_labels = torch.from_numpy(cv_test_labels).float().to(device)
+
+    # Scaling bit dodgy due to padding with zeros, TODO: fix later...
     model = None
-    sc = StandardScaler()
-
+    sc = CustomStandardScaler()
+    cv_training_feats = sc.fit_transform(cv_training_feats)
+    cv_test_feats = sc.transform(cv_test_feats)
+    # sc_sk = StandardScaler()
     for i in range(30, 31, 1):
 
-        train_scores = []
-        test_scores = []
+        train_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
+        test_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
         reg = None
         for j in range(len(cv_training_feats)):
-            training_feats_scaled = sc.fit_transform(cv_training_feats[j])
-            test_feats_scaled = sc.transform(cv_test_feats[j])
+            # curr_train_feats = torch.from_numpy(sc_sk.fit_transform(cv_training_feats[j])).float()
+            # curr_train_labels = torch.from_numpy(cv_training_labels[j]).float()
+            # curr_test_feats = torch.from_numpy(sc_sk.transform(cv_test_feats[j])).float()
+            # curr_test_labels = torch.from_numpy(cv_test_labels[j]).float()
+            # ds = CoolingDataset(curr_train_feats, curr_train_labels)
+            # ds = CoolingDataset(cv_training_feats[j], cv_training_labels[j])
 
-            train_loader = DataLoader(CoolingDataset(training_feats_scaled, cv_training_labels[j]), batch_size=200, shuffle=True)
+            # train_loader = DataLoader(ds, batch_size=256, shuffle=True)
 
 
             repeat = 5
             model = NeuralNetwork(len(flow_params) + 1, i).to(device)
             loss_fn = torch.nn.MSELoss()
-            #optimiser = torch.optim.SGD(model.parameters(), lr=1e-2)
+            # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
             optimiser = torch.optim.Adam(model.parameters(), lr=0.001)
 
-            epochs = 150
+            epochs = 100
             log = []
             for t in range(epochs):
                 #print(f"Epoch {t + 1}")
-                curr_log = train_loop(train_loader, model, loss_fn, optimiser, verbose=False)
+                curr_log = train_loop(cv_training_feats[j], cv_training_labels[j], model, loss_fn, optimiser,
+                                      batchsize=256, verbose=False)
                 log = log + curr_log
 
-            # plt.plot(log)
-            # plt.show()
-
-            # for _ in range(repeat):
-            #     reg = MLPRegressor(hidden_layer_sizes=(i), activation="relu", solver="adam", learning_rate="invscaling",
-            #                                             max_iter=2000, verbose=False, shuffle=True).fit(training_feats_scaled, cv_training_labels[j].ravel())
-            #
-            #     test_labels_pred = reg.predict(test_feats_scaled)
-            #     training_labels_pred = reg.predict(training_feats_scaled)
-            #
-            #
-            #     training_r2 += r2_score(cv_training_labels[j].ravel(),training_labels_pred.ravel())
-            #     test_r2 += r2_score(cv_test_labels[j].ravel(), test_labels_pred.ravel())
-            # training_r2 /= repeat
-            # test_r2 /= repeat
+            #plt.plot(log)
+            #plt.show()
 
             with torch.no_grad():
-                test_labels_pred = model(torch.from_numpy(test_feats_scaled).float())
-                training_labels_pred = model(torch.from_numpy(training_feats_scaled).float())
+                test_labels_pred = model(cv_test_feats[j])
+                training_labels_pred = model(cv_training_feats[j])
 
-                training_r2 = mean_squared_error(cv_training_labels[j].ravel(),training_labels_pred.ravel())
-                test_r2 = mean_squared_error(cv_test_labels[j].ravel(), test_labels_pred.ravel())
+                score = torch.nn.MSELoss()
+                train_scores[j] = torch.sqrt(score(training_labels_pred, cv_training_labels[j]))
+                test_scores[j] = torch.sqrt(score(test_labels_pred, cv_test_labels[j]))
 
+                # masked_train = remove_minmax(np.asarray(train_scores))
+                # masked_test = remove_minmax(np.asarray(test_scores))
+                # train_r2_mean = np.mean(train_scores) if len(train_scores) < 3 else masked_train.mean()
+                # train_r2_std = np.std(train_scores) if len(train_scores) < 3 else masked_train.std()
+                # test_r2_mean = np.mean(test_scores) if len(test_scores) < 3 else masked_test.mean()
+                # test_r2_std = np.std(test_scores) if len(test_scores) < 3 else masked_test.std()
 
-                train_scores.append(np.sqrt(training_r2))
-                test_scores.append(np.sqrt(test_r2))
+                print(f"\r{i:03}/{j+1:02} nodes", end="")
 
-                masked_train = remove_minmax(np.asarray(train_scores))
-                masked_test = remove_minmax(np.asarray(test_scores))
-                train_r2_mean = np.mean(train_scores) if len(train_scores) < 3 else masked_train.mean()
-                train_r2_std = np.std(train_scores) if len(train_scores) < 3 else masked_train.std()
-                test_r2_mean = np.mean(test_scores) if len(test_scores) < 3 else masked_test.mean()
-                test_r2_std = np.std(test_scores) if len(test_scores) < 3 else masked_test.std()
+        print(f"\r{i:03}/{len(cv_training_feats):02} nodes, "
+              f"avg. training score: {train_scores.mean().item():.3g} "
+              f"σ = {train_scores.std().item():.3g}, "
+              f"avg. test score: {test_scores.mean().item():.3g} "
+              f"σ = {test_scores.std().item():.3g}")
 
-
-                print(f"\r{i:02}/{j+1:02} nodes, avg. training score: {train_r2_mean:.3g}, σ = {train_r2_std:.3g},"
-                      f" avg. test score: {test_r2_mean:.3g}, σ = {test_r2_std:.3g}", end='')
-
-        print("")
-
-    #exit(0)
+    # exit(0)
 
     # fig, axes = plt.subplots(1, 2, figsize=(16, 9), sharey=True)
     #
@@ -186,22 +226,23 @@ if __name__ == "__main__":
     # axes[1].plot(test_labels, test_labels, color='red')
     # plt.show()
 
-    with torch.no_grad():
-        for file in test_files:
-            f = Figure(file)
-            feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
-            study_name = file.name.split('_')[0]
-            is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
-
-            fig, axes = plt.subplots(1, len(feats), figsize=(16, 9), sharey=True)
-            fig.suptitle(f"{file.name}\nIs same study in training set?{'Yes' if is_study_in_training else 'No'}")
-
-            for feat, label, ax in zip(feats, labels, np.atleast_1d(axes)):
-                feat_scaled = sc.transform(feat)
-
-                label_pred = model(torch.from_numpy(feat_scaled).float())
-                ax.errorbar(feat_scaled[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
-                ax.plot(feat_scaled[:, -1], label_pred, color="orange", label="NN predicted")
-                ax.legend()
-
-            plt.show()
+    # with torch.no_grad():
+    #     for file in test_files:
+    #         f = Figure(file)
+    #         feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
+    #         study_name = file.name.split('_')[0]
+    #         is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
+    #
+    #         fig, axes = plt.subplots(1, len(feats), figsize=(16, 9), sharey=True)
+    #         fig.suptitle(f"{file.name}\nIs same study in training set?{'Yes' if is_study_in_training else 'No'}")
+    #
+    #         for feat, label, ax in zip(feats, labels, np.atleast_1d(axes)):
+    #             # feat_scaled = torch.from_numpy(sc_sk.transform(feat)).float()
+    #             feat_scaled = (torch.from_numpy(feat).float() - sc.mean[-1]) / sc.std[-1]
+    #
+    #             label_pred = model(feat_scaled)
+    #             ax.errorbar(feat_scaled[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
+    #             ax.plot(feat_scaled[:, -1], label_pred, color="orange", label="NN predicted")
+    #             ax.legend()
+    #
+    #         plt.show()
