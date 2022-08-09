@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from fcdb import CoolingDatabase, Figure
+from bayesian_ensemble_network import BayesianNetworkEnsemble
 
 def remove_minmax(array):
     mask = np.logical_or(array == array.max(keepdims=True), array == array.min(keepdims= True))
@@ -50,17 +51,16 @@ class CoolingDataset(Dataset):
         return feat, label
 
 
-def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
+def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False, device="cpu"):
     if len(features) != len(labels):
         raise ValueError("Features and labels must have same length")
     size = len(features)
     log = []
     no_batches = size // batchsize + 1
-    rand_indices = torch.randperm(size)
+    rand_indices = torch.randperm(size, device=device)
     for i in range(no_batches):
         batch_start = i * batchsize
         batch_end = min((i + 1) * batchsize,size)
-        rand_indices = torch.randperm(size)
         if batch_end != batch_start:
             X = features[rand_indices[batch_start:batch_end]]
             y = labels[rand_indices[batch_start:batch_end]]
@@ -152,12 +152,12 @@ if __name__ == "__main__":
     cv_test_labels = torch.from_numpy(cv_test_labels).float().to(device)
 
     # Scaling bit dodgy due to padding with zeros, TODO: fix later...
-    model = None
+    ensemble = None
     sc = CustomStandardScaler()
     cv_training_feats = sc.fit_transform(cv_training_feats)
     cv_test_feats = sc.transform(cv_test_feats)
     # sc_sk = StandardScaler()
-    for i in range(30, 31, 1):
+    for i in range(100, 101, 50):
 
         train_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
         test_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
@@ -172,27 +172,32 @@ if __name__ == "__main__":
 
             # train_loader = DataLoader(ds, batch_size=256, shuffle=True)
 
+            ensemble = BayesianNetworkEnsemble(len(flow_params) + 1, layers=[i, 1], noise_variance=0.018 ** 2)
 
-            repeat = 5
-            model = NeuralNetwork(len(flow_params) + 1, i).to(device)
-            loss_fn = torch.nn.MSELoss()
-            # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
-            optimiser = torch.optim.Adam(model.parameters(), lr=0.001)
+            logs = []
+            for modelidx, model in enumerate(ensemble):
 
-            epochs = 100
-            log = []
-            for t in range(epochs):
-                #print(f"Epoch {t + 1}")
-                curr_log = train_loop(cv_training_feats[j], cv_training_labels[j], model, loss_fn, optimiser,
-                                      batchsize=256, verbose=False)
-                log = log + curr_log
+                print(f"------ Training model #{modelidx + 1} ------")
+                loss_fn = torch.nn.MSELoss()
+                # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
+                optimiser = torch.optim.Adam(model.parameters(), lr=0.001)
 
-            #plt.plot(log)
-            #plt.show()
+                epochs = 100
+                log = []
+                for t in range(epochs):
+                    # print(f"Epoch {t + 1}")
+                    curr_log = train_loop(cv_training_feats[j], cv_training_labels[j], model, loss_fn, optimiser,
+                                          batchsize=256, verbose=False, device=device)
+                    log = log + curr_log
+
+                logs.append(log)
+            # for log in logs:
+            #     plt.plot(log[10:])
+            # plt.show()
 
             with torch.no_grad():
-                test_labels_pred = model(cv_test_feats[j])
-                training_labels_pred = model(cv_training_feats[j])
+                test_labels_pred, _ = ensemble(cv_test_feats[j])
+                training_labels_pred, _ = ensemble(cv_training_feats[j])
 
                 score = torch.nn.MSELoss()
                 train_scores[j] = torch.sqrt(score(training_labels_pred, cv_training_labels[j]))
@@ -226,23 +231,35 @@ if __name__ == "__main__":
     # axes[1].plot(test_labels, test_labels, color='red')
     # plt.show()
 
-    # with torch.no_grad():
-    #     for file in test_files:
-    #         f = Figure(file)
-    #         feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
-    #         study_name = file.name.split('_')[0]
-    #         is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
-    #
-    #         fig, axes = plt.subplots(1, len(feats), figsize=(16, 9), sharey=True)
-    #         fig.suptitle(f"{file.name}\nIs same study in training set?{'Yes' if is_study_in_training else 'No'}")
-    #
-    #         for feat, label, ax in zip(feats, labels, np.atleast_1d(axes)):
-    #             # feat_scaled = torch.from_numpy(sc_sk.transform(feat)).float()
-    #             feat_scaled = (torch.from_numpy(feat).float() - sc.mean[-1]) / sc.std[-1]
-    #
-    #             label_pred = model(feat_scaled)
-    #             ax.errorbar(feat_scaled[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
-    #             ax.plot(feat_scaled[:, -1], label_pred, color="orange", label="NN predicted")
-    #             ax.legend()
-    #
-    #         plt.show()
+    with torch.no_grad():
+        for file in test_files:
+            f = Figure(file)
+            feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
+            study_name = file.name.split('_')[0]
+            is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
+
+            fig, axes = plt.subplots(1, len(feats), figsize=(16, 9), sharey=True)
+            fig.suptitle(f"{file.name}\nIs same study in training set?{'Yes' if is_study_in_training else 'No'}")
+
+            for feat, label, ax in zip(feats, labels, np.atleast_1d(axes)):
+
+                # feat_scaled = torch.from_numpy(sc_sk.transform(feat)).float()
+                feat_torched = torch.from_numpy(feat).float()
+                if len(feat) < 10:
+                    min_x = torch.min(feat_torched[:, -1]).item()
+                    max_x = torch.max(feat_torched[:, -1]).item()
+                    no_dims = feat_torched.size(dim=1)
+                    feat_torched = torch.tile(feat_torched[0], (10, 1))
+                    feat_torched[:, -1] = torch.linspace(min_x, max_x, 10)
+
+                feat_scaled = (feat_torched - sc.mean[-1]) / sc.std[-1]
+
+
+                label_pred_mean, label_pred_std = ensemble(feat_scaled)
+                upper, lower = label_pred_mean + 2 * label_pred_std, label_pred_mean - 2 * label_pred_std
+                ax.errorbar(feat[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
+                ax.plot(feat_torched[:, -1], label_pred_mean[:, 0], color="orange", label="NN predicted")
+                ax.fill_between(feat_torched[:, -1], upper[:, 0], lower[:, 0], alpha=0.4, label="95% confidence")
+                ax.legend()
+
+            plt.show()
