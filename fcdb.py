@@ -234,6 +234,7 @@ class Figure:
         with open(file) as figure_file:
             self.__figure_dict = json.load(figure_file)
 
+            self.__variations_in = []
             # Convert every list to a numpy array
             for top_key in self.__figure_dict.keys():
                 for key, value in self.__figure_dict[top_key].items():
@@ -243,6 +244,8 @@ class Figure:
                             # If list of lists, turn it to a list of NumPy arrays
                             self.__figure_dict[top_key][key] = [np.asarray(x) for x in value]
                         else:
+                            if top_key != 'distributions':
+                                self.__variations_in.append(key)
                             self.__figure_dict[top_key][key] = np.asarray(self.__figure_dict[top_key][key])
 
             self.__is_single_hole = self.__figure_dict['geometry']['is_single_hole']
@@ -376,12 +379,14 @@ class Figure:
         Parameters
         ----------
         flow_param_list: Sequence[str]
-            List of flow parameters to include as features, in string format (case insensitive).
+            List of flow parameters to include as features, in string format (case-insensitive).
             Possible values with aliases:
             Area ratio: "AR", "Area ratio"
             W/D: "W_D", "W/D", "Coverage ratio"
+            Sin(beta): "Beta", "Orientation angle", "Compound angle
             Re: "Re", "Reynolds", "Reynolds number"
             Ma: "Ma", "Mach", "Mach number"
+            Tu: "Tu", "Turbulence intensity", "Turbulence number"
             VR: "VR", "Velocity ratio"
             BR: "BR", "Blowing ratio"
             DR: "DR", "Density ratio"
@@ -397,8 +402,10 @@ class Figure:
             flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
 
         AR, _, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
+        Beta = np.sin(np.radians(self.__beta))
         Re = self.get_reynolds()
         Ma = self.get_mach()
+        Tu = self.__Tu
         VR = self.get_velocity_ratio()
         BR = self.__BR
         DR = self.__DR
@@ -412,10 +419,14 @@ class Figure:
             features.append(AR)
         if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list ):
             features.append(W_D)
+        if any(param_string.lower() in ["beta", "compound angle", "orientation angle"] for param_string in flow_param_list ):
+            features.append(Beta)
         if any(param_string.lower() in ["re", "reynolds", "reynolds number"] for param_string in flow_param_list ):
             features.append(Re)
         if any(param_string.lower() in ["ma", "mach", "mach number"] for param_string in flow_param_list ):
             features.append(Ma)
+        if any(param_string.lower() in ["tu", "turbulence intensity", "tu number"] for param_string in flow_param_list ):
+            features.append(Tu)
         if any(param_string.lower() in ["vr", "velocity ratio"] for param_string in flow_param_list ):
             features.append(VR)
         if any(param_string.lower() in ["br", "blowing ratio"] for param_string in flow_param_list ):
@@ -476,6 +487,9 @@ class Figure:
         """
         return self.__uncertainty_eff_abs
 
+    def __str__(self):
+        return f"Study: {self.__ref}, {self.__fig}, varies parameters: {self.__variations_in}"
+
     @staticmethod
     def feature_names(flow_param_list: Sequence[str] = None) -> list:
         name_list = []
@@ -486,10 +500,14 @@ class Figure:
                 name_list.append("Area ratio")
             if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list ):
                 name_list.append("Coverage ratio")
+            if any(param_string.lower() in ["beta", "compound angle", "orientation angle"] for param_string in flow_param_list):
+                name_list.append("Compound angle")
             if any(param_string.lower() in ["re", "reynolds", "reynolds number"] for param_string in flow_param_list ):
                 name_list.append("Reynolds number")
             if any(param_string.lower() in ["ma", "mach", "mach number"] for param_string in flow_param_list ):
                 name_list.append("Mach number")
+            if any(param_string.lower() in ["tu", "turbulence intensity", "tu number"] for param_string in flow_param_list ):
+                name_list.append("Tu number")
             if any(param_string.lower() in ["vr", "velocity ratio"] for param_string in flow_param_list ):
                 name_list.append("Velocity ratio")
             if any(param_string.lower() in ["br", "blowing ratio"] for param_string in flow_param_list ):
