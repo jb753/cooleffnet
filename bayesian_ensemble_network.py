@@ -137,6 +137,12 @@ def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
 
     return log
 
+def log_likelihood(pred_mean, pred_std, target):
+    log_2pi = 1.83787706641
+    return torch.mean(0.5 * (torch.square(pred_mean - target) / torch.square(pred_std) + torch.log(
+        torch.square(pred_std)) + log_2pi))
+
+
 def ensemble_predict(models, X):
     with torch.no_grad():
         preds = torch.stack([m(X) for m in models])
