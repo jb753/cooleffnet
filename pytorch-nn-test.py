@@ -263,7 +263,7 @@ if __name__ == "__main__":
 
     # Use entire dataset for cross validation
     db.generate_dataset(12000, 0, flow_param_list=flow_params)
-    (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(cv_count, padding="max")
+    (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(cv_count, padding="random")
 
     cv_training_feats = np.stack(cv_training_feats)
     cv_training_labels = np.stack(cv_training_labels)
@@ -322,8 +322,8 @@ if __name__ == "__main__":
         'test_minimum': test_min,
         'training_count': len(training_feats),
         'test_count': len(test_feats),
-        'training_files': [f.name for f in training_files],
-        'test_files': [f.name for f in test_files],
+        'training_files': sorted([f.name for f in training_files]),
+        'test_files': sorted([f.name for f in test_files]),
         'input_parameters': flow_params + ['x_D'],
         'no_nodes': nodes,
         'no_hidden': no_hidden,
@@ -368,7 +368,6 @@ if __name__ == "__main__":
 
                 feat_to_plot_scaled = (feat_to_plot - sc.mean[-1]) / sc.std[-1]
                 feat_scaled = (feat_torched - sc.mean[-1]) / sc.std[-1]
-
 
                 label_pred_mean, label_pred_std = ensemble(feat_scaled)
 

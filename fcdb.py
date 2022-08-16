@@ -143,7 +143,7 @@ class CoolingDatabase:
             for feat_set, label_set, length in zip(feat_sets, label_sets, lengths):
                 padding_length = largest_set_size - length
                 if padding_length > 0:
-                    feat_set.append(np.ones((padding_length, feat_set[0].shape[-1])))
+                    feat_set.append(np.zeros((padding_length, feat_set[0].shape[-1])))
                     label_set.append(np.zeros(padding_length))
 
         feat_sets = [np.concatenate(x) for x in feat_sets]
@@ -153,6 +153,18 @@ class CoolingDatabase:
             min_set_size = min(lengths)
             feat_sets = [x[:min_set_size] for x in feat_sets]
             label_sets = [x[:min_set_size] for x in label_sets]
+
+
+        if padding == "random":
+            largest_set_size = max(lengths)
+            for i, (feat_set, label_set, length) in enumerate(zip(feat_sets, label_sets, lengths)):
+                padding_length = largest_set_size - length
+                padding_indices = np.random.choice(length, padding_length)
+                padding_feats = feat_set[padding_indices]
+                padding_labels = label_set[padding_indices]
+
+                feat_sets[i] = np.concatenate((feat_set, padding_feats))
+                label_sets[i] = np.concatenate((label_set, padding_labels))
 
         return feat_sets, label_sets
 
