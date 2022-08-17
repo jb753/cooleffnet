@@ -60,6 +60,7 @@ def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False, 
             pred = model(X)
             loss = loss_fn(pred, y)
 
+            loss += model.regularization() / size
             # Backpropagation
             opt.zero_grad()
             loss.backward()
@@ -144,7 +145,8 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
                      layers: Sequence[int],
                      stats: bool = True,
                      verbose: bool = False,
-                     show_loss: bool = False) -> BayesianNetworkEnsemble | Tuple[BayesianNetworkEnsemble, Dict]:
+                     show_loss: bool = False,
+                     show_importances: bool = False) -> BayesianNetworkEnsemble | Tuple[BayesianNetworkEnsemble, Dict]:
     cv_training_feats, cv_training_labels = cv_training
     cv_test_feats, cv_test_labels = cv_test
     ensembles = []
@@ -152,6 +154,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
     train_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
     test_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
     reg = None
+    importances = torch.empty((len(cv_training_feats), cv_training_feats.shape[-1]))
     for cv_idx in range(len(cv_training_feats)):
         # curr_train_feats = torch.from_numpy(sc_sk.fit_transform(cv_training_feats[j])).float()
         # curr_train_labels = torch.from_numpy(cv_training_labels[j]).float()
@@ -170,6 +173,15 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
         train_scores[cv_idx] = train_score
         test_scores[cv_idx] = test_score
         ensembles.append(ensemble)
+        importances[cv_idx] = ensemble.importance()
+        if verbose:
+            print(f"Importances: {importances[cv_idx]}")
+
+    avg_importances = importances.mean(dim=0)
+    avg_importances /= avg_importances.max()
+    if show_importances:
+        plt.bar(avg_importances)
+        plt.show()
 
     masked_train = remove_minmax(train_scores)
     masked_test = remove_minmax(test_scores)
@@ -177,6 +189,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
         stats = {
             'training_scores': train_scores.tolist(),
             'test_scores': test_scores.tolist(),
+            'average_importances': avg_importances.tolist(),
             'training_average': train_scores.mean().item(),
             'masked_training_average': masked_train.mean().item(),
             'test_average': test_scores.mean().item(),
@@ -184,7 +197,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
             'training_stdev': train_scores.std().item(),
             'masked_training_stdev': masked_train.std().item(),
             'test_stdev': test_scores.std().item(),
-            'masked_test_stdev': masked_test.std().item()
+            'masked_test_stdev': masked_test.std().item(),
         }
         return ensembles, stats
     else:
@@ -227,6 +240,8 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--nodes", type=int, help="Number of nodes in each hidden layer", default=100)
     parser.add_argument("--cv", type=int, help="Number of cross-validation sets", default=5)
     parser.add_argument("--hidden", type=int, help="Number of hidden layers", default=1)
+    parser.add_argument("--logx", action="store_true", help="Use log(x/D) as a feature instead of x/D")
+    parser.add_argument("--comment", type=str, help="Comment to save in the run log", default="")
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -242,7 +257,7 @@ if __name__ == "__main__":
 
 
     db = CoolingDatabase(Path(args.directory))
-    flow_params = ["Ma", "AR", "VR", "Re", "W/D", "BR", "beta"]
+    flow_params = ["Ma", "AR", "VR", "Re", "W/D", "IR normal", "IR perpendicular"]
     epochs = args.epochs
     nodes = args.nodes
     no_hidden = args.hidden
@@ -250,6 +265,7 @@ if __name__ == "__main__":
     cv_count = args.cv
     training_min = 10000
     test_min = 2000
+    is_logx = args.logx
 
     print(f"Using variables {flow_params}\n"
           f"Running for {epochs} epochs, with network layers: {layers}\n")
@@ -276,6 +292,12 @@ if __name__ == "__main__":
     cv_test_feats = torch.from_numpy(cv_test_feats).float().to(device)
     cv_test_labels = torch.from_numpy(cv_test_labels).float().to(device)
 
+    # Log x/D
+    if is_logx:
+        cv_training_feats[:, :, -1] = torch.log(cv_training_feats[:, :, -1])
+        cv_test_feats[:, :, -1] = torch.log(cv_test_feats[:, :, -1])
+        training_feats[:, -1] = np.log(training_feats[:, -1])
+        test_feats[:, -1] = np.log(test_feats[:, -1])
     # Scaling bit dodgy due to padding with zeros, TODO: fix later...
     ensemble = None
     sc = CustomStandardScaler()
@@ -292,6 +314,7 @@ if __name__ == "__main__":
           f"avg. test score: {cv_results['masked_test_average']:.3g} "
           f"σ = {cv_results['masked_test_stdev']:.3g}")
     print(f"All training scores: {cv_results['training_scores']}\nAll test scores: {cv_results['test_scores']}")
+    print(f"Average relative feature importances: {cv_results['average_importances']}")
 
     training_feats = sc.fit_transform(torch.from_numpy(training_feats).float().to(device), dim=0)
     training_labels = torch.from_numpy(training_labels).float().to(device)
@@ -307,7 +330,7 @@ if __name__ == "__main__":
 
     print("Now training with all training data")
     train_main_score, test_main_score = train_ensemble(ensemble, (training_feats, training_labels), (test_feats, test_labels),
-                                                       epochs, verbose=True, show_loss=args.loss)
+                                                       epochs, verbose=False, show_loss=args.loss)
     print(f"Training score: {train_main_score:.3g}, " 
           f"Test score: {test_main_score:.3g}")
 
@@ -325,10 +348,12 @@ if __name__ == "__main__":
         'training_files': sorted([f.name for f in training_files]),
         'test_files': sorted([f.name for f in test_files]),
         'input_parameters': flow_params + ['x_D'],
+        'is_logx': is_logx,
         'no_nodes': nodes,
         'no_hidden': no_hidden,
         'epochs': epochs,
         'layers': layers,
+        'comment': args.comment,
         'cv_count': cv_count,
         'cv_results': cv_results,
         'all_training_result': train_main_score.item(),
@@ -358,7 +383,7 @@ if __name__ == "__main__":
                 # Resample if less than 10 datapoints
                 resample_forplot = len(feat) < 10
                 feat_torched = torch.from_numpy(feat).float()
-                feat_to_plot = feat_torched
+                feat_to_plot = feat_torched.detach().clone()
                 if resample_forplot:
                     min_x = torch.min(feat_torched[:, -1]).item()
                     max_x = torch.max(feat_torched[:, -1]).item()
@@ -366,15 +391,21 @@ if __name__ == "__main__":
                     feat_to_plot = torch.tile(feat_torched[0], (10, 1))
                     feat_to_plot[:, -1] = torch.linspace(min_x, max_x, 10)
 
+                if is_logx:
+                    feat_to_plot[:, -1] = torch.log(feat_to_plot[:, -1])
+                    feat_torched[:, -1] = torch.log(feat_torched[:, -1])
                 feat_to_plot_scaled = (feat_to_plot - sc.mean[-1]) / sc.std[-1]
                 feat_scaled = (feat_torched - sc.mean[-1]) / sc.std[-1]
 
                 label_pred_mean, label_pred_std = ensemble(feat_scaled)
 
-                label_toplot_mean, label_toplot_std =  label_pred_mean, label_pred_std
+                label_toplot_mean, label_toplot_std = label_pred_mean.detach().clone(), label_pred_std.detach().clone()
                 if resample_forplot:
                     label_toplot_mean, label_toplot_std = ensemble(feat_to_plot_scaled)
                 upper, lower = label_toplot_mean + 2 * label_toplot_std, label_toplot_mean - 2 * label_toplot_std
+
+                if is_logx:
+                    feat_to_plot[:, -1] = torch.exp(feat_to_plot[:, -1])
                 ax.errorbar(feat[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
                 ax.plot(feat_to_plot[:, -1], label_toplot_mean[:, 0], color="orange", label="NN predicted")
                 ax.fill_between(feat_to_plot[:, -1], upper[:, 0], lower[:, 0], alpha=0.4, label="95% confidence")
@@ -387,7 +418,9 @@ if __name__ == "__main__":
                 # ax.legend()
 
             fig.suptitle(f"{f}\n"
-                         f"Parameters used: {flow_params}, NN layers: {ensemble.layers}\n"
+                         f"Parameters used: {flow_params}, NN layers: {ensemble.layers}, "
+                         f"$\log{{x/D}}$ as feature? {'Yes' if is_logx else 'No'}\n"
+                         f"{args.comment}\n"
                          f"Is same study in training set? {'Yes' if is_study_in_training else 'No'}\n"
                          f"Average MSE: {sum(scores)/len(scores):.3g}")
 

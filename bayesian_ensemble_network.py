@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Tuple
 import math
 
 import numpy as np
@@ -68,6 +68,12 @@ class BayesianNetwork(torch.nn.Module):
 
         return loss_unnorm
 
+    def importance(self):
+        if len(self.layers) != 2:
+            raise ValueError("Feature importance only defined for networks with exactly 1 hidden layer")
+        with torch.no_grad():
+            return torch.squeeze(torch.matmul(self.stack[2].weight.data, self.stack[0].weight.data).abs())
+
     def forward(self, x):
         return self.stack(x)
 
@@ -102,6 +108,22 @@ class BayesianNetworkEnsemble:
                 return pred_mean, pred_std, preds
             else:
                 return pred_mean, pred_std
+
+    def importance(self, relative: bool = False, return_std: bool = False) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
+        importances = torch.empty((self.no_models, self.in_features))
+        for i in range(self.no_models):
+            importances[i] = self.models[i].importance()
+        avg = importances.mean(dim=0)
+        std = importances.std(dim=0)
+        if relative:
+            max_importance = avg.max()
+            avg /= max_importance
+            std /= max_importance
+        if return_std:
+            return avg, std
+        else:
+            return avg
+
 
 
 def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
