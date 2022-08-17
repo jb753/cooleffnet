@@ -195,8 +195,6 @@ class CoolingDatabase:
 
         return (cv_train_feats, cv_train_labels), (cv_test_feats, cv_test_labels)
 
-
-
     # TODO: Rethink this, are there options for making it stateless?
     def get_dataset(self, test: bool = False, normalize_features = False, normalize_labels=False,
                      zero_mean_features=False, zero_mean_labels=False, return_stats: bool = False):
@@ -395,7 +393,7 @@ class Figure:
             Possible values with aliases:
             Area ratio: "AR", "Area ratio"
             W/D: "W_D", "W/D", "Coverage ratio"
-            Sin(beta): "Beta", "Orientation angle", "Compound angle
+            Sin(beta): "Beta", "Orientation angle", "Compound angle"
             Re: "Re", "Reynolds", "Reynolds number"
             Ma: "Ma", "Mach", "Mach number"
             Tu: "Tu", "Turbulence intensity", "Turbulence number"
@@ -403,6 +401,7 @@ class Figure:
             BR: "BR", "Blowing ratio"
             DR: "DR", "Density ratio"
             IR: "IR", "Momentum flux ratio"
+            Single hole: "Single", "Single hole", "Is single hole"
 
         Returns
         -------
@@ -422,6 +421,9 @@ class Figure:
         BR = self.__BR
         DR = self.__DR
         IR = self.__IR
+        IR_normal = self.__IR * np.sin(np.radians(self.__alpha))
+        IR_perpendicular = self.__IR * np.sin(np.radians(self.__beta))
+        Single_hole = 1 if self.__is_single_hole else -1
         x_D = self.__x_D
         eff = self.__eff
 
@@ -447,6 +449,15 @@ class Figure:
             features.append(DR)
         if any(param_string.lower() in ["ir", "momentum flux ratio"] for param_string in flow_param_list ):
             features.append(IR)
+        if any(param_string.lower() in ["ir normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
+            features.append(IR_normal)
+        if any(param_string.lower() in ["ir perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
+            features.append(IR_perpendicular)
+        if any(param_string.lower() in ["single", "single hole", "is single hole"] for param_string in flow_param_list):
+            features.append(Single_hole)
+
+        if len(features) != len(flow_param_list):
+            raise ValueError(f"Unknown parameter in flow parameter list: {flow_param_list}")
 
         # Keep x_D and eff at the end in any case
         features.append(x_D)
@@ -528,6 +539,12 @@ class Figure:
                 name_list.append("Density ratio")
             if any(param_string.lower() in ["ir", "momentum flux ratio"] for param_string in flow_param_list ):
                 name_list.append("Momentum flux ratio")
+            if any(param_string.lower() in ["ir normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
+                name_list.append("Momentum flux ratio normal to wall")
+            if any(param_string.lower() in ["ir perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
+                name_list.append("Momentum flux ratio perpendicular to wall")
+            if any(param_string.lower() in ["single", "single hole", "is single hole"] for param_string in flow_param_list ):
+                name_list.append("Is single hole? Larger value means yes")
 
             name_list.append("Horizontal position over diameter")
             return name_list
