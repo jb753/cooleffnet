@@ -371,12 +371,12 @@ if __name__ == "__main__":
             feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
             study_name = file.name.split('_')[0]
             is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
-
+            corr_xs, corr_effs = f.get_correlations()
             fig, axes = plt.subplots(1, len(feats), figsize=(16, 9), sharey=True)
 
             fig.set_tight_layout(True)
             scores = []
-            for feat, label, ax in zip(feats, labels, np.atleast_1d(axes)):
+            for feat, label, ax, corr_x, corr_eff in zip(feats, labels, np.atleast_1d(axes), corr_xs, corr_effs):
 
                 # feat_scaled = torch.from_numpy(sc_sk.transform(feat)).float()
 
@@ -403,13 +403,12 @@ if __name__ == "__main__":
                 if resample_forplot:
                     label_toplot_mean, label_toplot_std = ensemble(feat_to_plot_scaled)
                 upper, lower = label_toplot_mean + 2 * label_toplot_std, label_toplot_mean - 2 * label_toplot_std
-
                 if is_logx:
                     feat_to_plot[:, -1] = torch.exp(feat_to_plot[:, -1])
                 ax.errorbar(feat[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
                 ax.plot(feat_to_plot[:, -1], label_toplot_mean[:, 0], color="orange", label="NN predicted")
                 ax.fill_between(feat_to_plot[:, -1], upper[:, 0], lower[:, 0], alpha=0.4, label="95% confidence")
-
+                ax.plot(corr_x, corr_eff, color="green", label="Correlation")
                 curr_score = torch.sqrt(score(torch.squeeze(label_pred_mean), torch.from_numpy(label).float()))
                 scores.append(curr_score)
 

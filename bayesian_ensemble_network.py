@@ -72,7 +72,7 @@ class BayesianNetwork(torch.nn.Module):
         if len(self.layers) != 2:
             raise ValueError("Feature importance only defined for networks with exactly 1 hidden layer")
         with torch.no_grad():
-            return torch.squeeze(torch.matmul(self.stack[2].weight.data, self.stack[0].weight.data).abs())
+            return torch.squeeze(torch.matmul(self.stack[2].weight.data.abs(), self.stack[0].weight.abs()))
 
     def forward(self, x):
         return self.stack(x)

@@ -1,5 +1,6 @@
 import itertools
 import json
+import math
 import random
 from pathlib import Path
 from typing import Sequence, Tuple
@@ -8,6 +9,7 @@ import numpy as np
 import CoolProp.CoolProp as CoolProp
 
 import util
+import correlations
 
 
 class CoolingDatabase:
@@ -28,7 +30,7 @@ class CoolingDatabase:
         self.__test_total = 0
 
     def generate_dataset(self, training_min: int, test_min: int, unique_params: bool = False, shuffle: bool = True,
-                         flow_param_list: Sequence[str] = None):
+                         flow_param_list: Sequence[str] = None, include_correlations: bool = False):
         if flow_param_list is None:
             flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
 
@@ -52,7 +54,7 @@ class CoolingDatabase:
         test_count = 0
         for file in file_list:
             fig = Figure(file)
-            feats, labels = fig.get_feature_label_maps(flow_param_list)
+            feats, labels = fig.get_feature_label_maps(flow_param_list, include_correlations)
             no_data_points = sum(len(x) for x in feats)
 
             if unique_params:
@@ -147,7 +149,9 @@ class CoolingDatabase:
                     label_set.append(np.zeros(padding_length))
 
         feat_sets = [np.concatenate(x) for x in feat_sets]
-        label_sets = [np.atleast_2d(np.concatenate(x)).T for x in label_sets]
+        label_sets = [np.atleast_2d(np.concatenate(x)) for x in label_sets]
+        if label_sets[0].shape[0] == 1:
+            label_sets = [x.T for x in label_sets]
 
         if padding == "min":
             min_set_size = min(lengths)
@@ -203,7 +207,9 @@ class CoolingDatabase:
 
         feat_matrix = np.concatenate(self.__training_feats) if not test else np.concatenate(self.__test_feats)
         label_matrix = np.concatenate(self.__training_labels) if not test else np.concatenate(self.__test_labels)
-        label_matrix = np.atleast_2d(label_matrix).T
+        label_matrix = np.atleast_2d(label_matrix)
+        if label_matrix.shape[0] == 1:
+            label_matrix = label_matrix.T
 
         feat_means, feat_stdevs = np.mean(feat_matrix, axis=0), np.std(feat_matrix, axis=0)
         label_means, label_stdevs = np.mean(label_matrix, axis=0), np.std(label_matrix, axis=0)
@@ -265,6 +271,8 @@ class Figure:
             self.__psi = self.__figure_dict['geometry']['psi']
             self.__Lphi_D = self.__figure_dict['geometry']['Lphi_D']
             self.__Lpsi_D = self.__figure_dict['geometry']['Lpsi_D']
+            self.__P_D = self.__figure_dict['geometry']['P_D']
+            self.__L_D = self.__figure_dict['geometry']['L_D']
             self.__is_x_origin_trailing_edge = self.__figure_dict['geometry']['is_x_origin_trailing_edge']
 
             # Check if Vinf exists
@@ -370,6 +378,57 @@ class Figure:
         """Returns the coolant to mainstream flow velocity ratio"""
         return self.__BR / self.__DR
 
+    def __get_single_correlation(self, AR, P_D, W_P, BR, DR, Tu, alpha, edge_offset, x_D):
+        if type(AR) is np.ndarray or \
+                type(P_D) is np.ndarray or \
+                type(W_P) is np.ndarray or \
+                type(BR) is np.ndarray or \
+                type(DR) is np.ndarray or \
+                type(Tu) is np.ndarray or \
+                type(alpha) is np.ndarray or \
+                type(edge_offset) is np.ndarray or \
+                type(x_D) is list:
+            raise ValueError("For a single correlation, all inputs should be single values")
+        if math.isclose(AR, 1.0):
+            # Cylindrical hole, use Baldauf's correlation
+            return correlations.baldauf(x_D, alpha, P_D, BR, DR, Tu, b_0="fit")
+        else:
+            # Shaped hole, use Colban's correlation
+            return correlations.colban(x_D - edge_offset,P_D, W_P, BR, AR)
+
+    def get_correlations(self):
+        AR, edge_offset, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
+        P_D = self.__P_D
+        W_P = W_D / P_D
+        BR = self.__BR
+        DR = self.__DR
+        Tu = self.__Tu / 100.0
+        alpha = self.__alpha
+        x_D = self.__x_D
+        features = [AR, P_D, W_P, BR, DR, Tu, alpha, edge_offset, x_D]
+
+        is_list = [False] * len(features)
+        is_list[:-1] = [type(x) is np.ndarray for x in features[:-1]]
+        is_list[-1:] = [type(x) is list for x in features[-1:]]
+
+        correlations = ([], [])
+        if type(x_D) is list:
+
+            length = len(features[next(i for i, x in enumerate(is_list) if x)])
+            for feature, is_a_list in zip(features, is_list):
+                if is_a_list and len(feature) != length:
+                    raise ValueError("Feature lists should have equal length")
+
+            for i in range(length):
+                next_feats = [feat[i] if is_list[j] else feat for j, feat in enumerate(features)]
+                eff = self.__get_single_correlation(*next_feats)
+                correlations[0].append(x_D[i])
+                correlations[1].append(eff)
+
+            return correlations
+        else:
+            return [x_D], [self.__get_single_correlation(*features)]
+
     def __get_single_feature_label_map(self, flow_params: Sequence[float],
                                        x_D: np.ndarray,
                                        eff: np.ndarray) -> Tuple[Sequence[float], Sequence[float]]:
@@ -381,7 +440,7 @@ class Figure:
             raise ValueError("For a single feature label map, all features should be single values")
         return np.asarray([[*flow_params,curr_x] for curr_x in x_D]), eff
 
-    def get_feature_label_maps(self, flow_param_list: Sequence[str] = None):
+    def get_feature_label_maps(self, flow_param_list: Sequence[str] = None, include_correlations: bool = False):
         """
         Returns a list of feature - label sets, one list per x/D - film effectiveness distribution
         Inclusion of flow parameters can be controlled, by default AR, W/D, Re, Ma and VR is included
@@ -488,6 +547,11 @@ class Figure:
                 raise ValueError("Arrays of x and y coordinates should have same length")
             single_map_feats, single_map_labels = self.__get_single_feature_label_map(features[:-2], x_D, eff)
             feat_label_map = [single_map_feats], [single_map_labels]
+
+        if include_correlations:
+            _, corr_eff = self.get_correlations()
+            for i in range(len(feat_label_map[1])):
+                feat_label_map[1][i] = np.stack((feat_label_map[1][i], corr_eff[i]), axis=1)
 
         return feat_label_map
 
