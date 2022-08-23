@@ -242,6 +242,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden", type=int, help="Number of hidden layers", default=1)
     parser.add_argument("--logx", action="store_true", help="Use log(x/D) as a feature instead of x/D")
     parser.add_argument("--comment", type=str, help="Comment to save in the run log", default="")
+    parser.add_argument("--filter", type=str, help="Data filter [cylindrical/shaped]", default=None)
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -257,7 +258,7 @@ if __name__ == "__main__":
 
 
     db = CoolingDatabase(Path(args.directory))
-    flow_params = ["Ma", "AR", "VR", "Re", "W/D", "IR normal", "IR perpendicular"]
+    flow_params = ["P/D", "W/P", "BR", "AR"]
     epochs = args.epochs
     nodes = args.nodes
     no_hidden = args.hidden
@@ -265,20 +266,21 @@ if __name__ == "__main__":
     cv_count = args.cv
     training_min = 10000
     test_min = 2000
+    data_filter = args.filter
     is_logx = args.logx
 
     print(f"Using variables {flow_params}\n"
           f"Running for {epochs} epochs, with network layers: {layers}\n")
 
     # Use normal test-train split for plotting purposes
-    db.generate_dataset(training_min, test_min, flow_param_list=flow_params)
+    db.generate_dataset(training_min, test_min, flow_param_list=flow_params, data_filter=data_filter)
     training_feats, training_labels = db.get_dataset()
     test_feats, test_labels = db.get_dataset(test=True)
     training_files = db.get_files()
     test_files = db.get_files(test=True)
 
     # Use entire dataset for cross validation
-    db.generate_dataset(12000, 0, flow_param_list=flow_params)
+    db.generate_dataset(12000, 0, flow_param_list=flow_params, data_filter=data_filter)
     (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(cv_count, padding="random")
 
     cv_training_feats = np.stack(cv_training_feats)
@@ -348,6 +350,7 @@ if __name__ == "__main__":
         'training_files': sorted([f.name for f in training_files]),
         'test_files': sorted([f.name for f in test_files]),
         'input_parameters': flow_params + ['x_D'],
+        'filter': data_filter,
         'is_logx': is_logx,
         'no_nodes': nodes,
         'no_hidden': no_hidden,
@@ -416,7 +419,7 @@ if __name__ == "__main__":
                 ax.set_ylim((0.0, 1.0))
                 # ax.legend()
 
-            fig.suptitle(f"{f}\n"
+            fig.suptitle(f"{f}, filter: {data_filter}\n"
                          f"Parameters used: {flow_params}, NN layers: {ensemble.layers}, "
                          f"$\log{{x/D}}$ as feature? {'Yes' if is_logx else 'No'}\n"
                          f"{args.comment}\n"

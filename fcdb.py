@@ -30,7 +30,7 @@ class CoolingDatabase:
         self.__test_total = 0
 
     def generate_dataset(self, training_min: int, test_min: int, unique_params: bool = False, shuffle: bool = True,
-                         flow_param_list: Sequence[str] = None, include_correlations: bool = False):
+                         flow_param_list: Sequence[str] = None, include_correlations: bool = False, data_filter: str = None):
         if flow_param_list is None:
             flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
 
@@ -54,7 +54,7 @@ class CoolingDatabase:
         test_count = 0
         for file in file_list:
             fig = Figure(file)
-            feats, labels = fig.get_feature_label_maps(flow_param_list, include_correlations)
+            feats, labels = fig.get_feature_label_maps(flow_param_list, include_correlations, data_filter)
             no_data_points = sum(len(x) for x in feats)
 
             if unique_params:
@@ -440,7 +440,8 @@ class Figure:
             raise ValueError("For a single feature label map, all features should be single values")
         return np.asarray([[*flow_params,curr_x] for curr_x in x_D]), eff
 
-    def get_feature_label_maps(self, flow_param_list: Sequence[str] = None, include_correlations: bool = False):
+    def get_feature_label_maps(self, flow_param_list: Sequence[str] = None, include_correlations: bool = False,
+                               data_filter: str = None):
         """
         Returns a list of feature - label sets, one list per x/D - film effectiveness distribution
         Inclusion of flow parameters can be controlled, by default AR, W/D, Re, Ma and VR is included
@@ -472,6 +473,9 @@ class Figure:
             flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
 
         AR, _, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
+        P_D = self.__P_D
+        W_P = W_D / P_D
+        Alpha = self.__alpha
         Beta = np.sin(np.radians(self.__beta))
         Re = self.get_reynolds()
         Ma = self.get_mach()
@@ -486,12 +490,27 @@ class Figure:
         x_D = self.__x_D
         eff = self.__eff
 
+        is_shaped = []
+        if type(eff) is list:
+            if type(AR) is np.ndarray:
+                is_shaped = [not math.isclose(ar, 1.0) for ar in AR]
+            else:
+                is_shaped = [not math.isclose(AR, 1.0)] * len(eff)
+        else:
+            is_shaped.append(not math.isclose(AR, 1.0))
+
         # Usings sets could technically be faster, but this should still be okay
         features = []
         if any(param_string.lower() in ["ar", "area ratio"] for param_string in flow_param_list):
             features.append(AR)
         if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list ):
             features.append(W_D)
+        if any(param_string.lower() in ["w/p", "w_p"] for param_string in flow_param_list ):
+            features.append(W_P)
+        if any(param_string.lower() in ["p/d", "p_d"] for param_string in flow_param_list ):
+            features.append(P_D)
+        if any(param_string.lower() in ["alpha"] for param_string in flow_param_list ):
+            features.append(Alpha)
         if any(param_string.lower() in ["beta", "compound angle", "orientation angle"] for param_string in flow_param_list ):
             features.append(Beta)
         if any(param_string.lower() in ["re", "reynolds", "reynolds number"] for param_string in flow_param_list ):
@@ -553,6 +572,10 @@ class Figure:
             for i in range(len(feat_label_map[1])):
                 feat_label_map[1][i] = np.stack((feat_label_map[1][i], corr_eff[i]), axis=1)
 
+        if data_filter == "shaped":
+            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if is_shaped[i]], [x for i, x in enumerate(feat_label_map[1]) if is_shaped[i]]
+        elif data_filter == "cylindrical":
+            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if not is_shaped[i]], [x for i, x in enumerate(feat_label_map[1]) if not is_shaped[i]]
         return feat_label_map
 
     def get_reynolds(self):
