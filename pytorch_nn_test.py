@@ -102,26 +102,60 @@ class NeuralNetwork(torch.nn.Module):
         return self.stack(x)
 
 
-def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show_loss: bool = False):
+def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show_loss: bool = False, device: str = "cpu",
+                   optargs: dict = None):
     training_feats, training_labels = training
     test_feats, test_labels = test
 
-    logs = []
-    for modelidx, model in enumerate(ensemble):
+    default_optargs = {
+        'lr': 0.0008,
+        'conv_limit': 0.005,
+        'batch_size': 256
+    }
 
+    if optargs is None:
+        optargs = default_optargs
+    else:
+        for key, value in default_optargs.items():
+            if key not in optargs:
+                optargs[key] = value
+
+
+    convergence_limit = optargs['conv_limit']
+    logs = [[] for _ in range(ensemble.no_models)]
+    has_converged = [False] * ensemble.no_models
+    mean = -1
+    stdev = -1
+    while not all(has_converged):
+        for modelidx, model in enumerate(ensemble):
+            if has_converged[modelidx]:
+                continue
+            else:
+                model.initialise_from_prior()
+
+            if verbose:
+                print(f"Training model #{modelidx + 1}")
+            loss_fn = torch.nn.MSELoss()
+            # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
+            optimiser = torch.optim.Adam(model.parameters(), lr=optargs['lr'])
+
+            log = []
+            for t in range(epochs):
+                curr_log = train_loop(training_feats, training_labels, model, loss_fn, optimiser,
+                                      batchsize=optargs['batch_size'], verbose=False, device=device)
+                log = log + curr_log
+
+            logs[modelidx] = log
+
+        last_logs = torch.Tensor([log[-1] for log in logs])
+        if mean == -1 or stdev == -1:
+            mean = last_logs.mean().item()
+            stdev = last_logs.std().item()
+        has_converged = [x < convergence_limit and x < (mean + stdev) for x in last_logs]
         if verbose:
-            print(f"Training model #{modelidx + 1}")
-        loss_fn = torch.nn.MSELoss()
-        # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
-        optimiser = torch.optim.Adam(model.parameters(), lr=0.001)
+            print(f"{has_converged.count(True)}/{ensemble.no_models} converged"
+                  f"{', retrying... ' if has_converged.count(True) != ensemble.no_models else ''}")
 
-        log = []
-        for t in range(epochs):
-            curr_log = train_loop(training_feats, training_labels, model, loss_fn, optimiser,
-                                  batchsize=256, verbose=False, device=device)
-            log = log + curr_log
-
-        logs.append(log)
     if show_loss:
         for log in logs:
             offset = 10 if len(log) > 10 else 0
@@ -143,6 +177,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
                      cv_test: Tuple[torch.Tensor, torch.Tensor],
                      epochs: int,
                      layers: Sequence[int],
+                     optargs: dict = None,
                      stats: bool = True,
                      verbose: bool = False,
                      show_loss: bool = False,
@@ -155,6 +190,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
     test_scores = torch.zeros([len(cv_training_feats)], dtype=torch.float)
     reg = None
     importances = torch.empty((len(cv_training_feats), cv_training_feats.shape[-1]))
+    nodes = layers[0]
     for cv_idx in range(len(cv_training_feats)):
         # curr_train_feats = torch.from_numpy(sc_sk.fit_transform(cv_training_feats[j])).float()
         # curr_train_labels = torch.from_numpy(cv_training_labels[j]).float()
@@ -169,7 +205,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
             print(f"----- {nodes:03}/{cv_idx + 1:02} nodes -----")
         ensemble = BayesianNetworkEnsemble(cv_training_feats.shape[-1], layers=layers, noise_variance=0.018 ** 2)
         train_score, test_score = train_ensemble(ensemble, (cv_training_feats[cv_idx], cv_training_labels[cv_idx]), (cv_test_feats[cv_idx], cv_test_labels[cv_idx]),
-                                                 epochs, show_loss=show_loss, verbose=verbose)
+                                                 epochs, show_loss=show_loss, verbose=verbose, optargs=optargs)
         train_scores[cv_idx] = train_score
         test_scores[cv_idx] = test_score
         ensembles.append(ensemble)
