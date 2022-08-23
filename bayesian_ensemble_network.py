@@ -25,6 +25,7 @@ class BayesianNetwork(torch.nn.Module):
                 self.stack.append(torch.nn.ReLU())
             elif i == (len(layers) - 1):
                 self.stack.append(torch.nn.Linear(layers[i - 1], layers[i], bias=False))
+                self.stack.append(torch.nn.ReLU())
             else:
                 self.stack.append(torch.nn.Linear(layers[i - 1], layers[i]))
                 self.stack.append(torch.nn.ReLU())
@@ -87,7 +88,7 @@ class BayesianNetworkEnsemble:
         self.noise_variance = noise_variance
         self.no_models = no_models
 
-    def __getitem__(self, item):
+    def __getitem__(self, item) -> BayesianNetwork:
         return self.models[item]
 
     def __len__(self):
