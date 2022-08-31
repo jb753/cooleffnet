@@ -14,7 +14,7 @@ from fcdb import CoolingDatabase, Figure
 from util import CustomMinMaxScaler, CustomStandardScaler
 from bayesian_ensemble_network import BayesianNetworkEnsemble
 
-RUN_ID = int(time.time())
+RUN_ID = time.time()
 def remove_minmax(array):
     mask = torch.logical_or(torch.eq(array, array.max()), torch.eq(array,array.min()))
     #a_masked = np.ma.masked_array(array, mask=mask)
@@ -108,8 +108,8 @@ def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show
     test_feats, test_labels = test
 
     default_optargs = {
-        'lr': 0.0008,
-        'conv_limit': 0.005,
+        'lr': 0.001,
+        'conv_limit': 0.002,
         'batch_size': 256
     }
 
@@ -124,8 +124,10 @@ def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show
     convergence_limit = optargs['conv_limit']
     logs = [[] for _ in range(ensemble.no_models)]
     has_converged = [False] * ensemble.no_models
+    converged_count = 0
     mean = -1
     stdev = -1
+    ensemble.train()
     while not all(has_converged):
         for modelidx, model in enumerate(ensemble):
             if has_converged[modelidx]:
@@ -136,8 +138,7 @@ def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show
             if verbose:
                 print(f"Training model #{modelidx + 1}")
             loss_fn = torch.nn.MSELoss()
-            # optimiser = torch.optim.SGD(model.parameters(), lr=1e-4)
-            optimiser = torch.optim.Adam(model.parameters(), lr=optargs['lr'])
+            optimiser = torch.optim.Adam(model.parameters(), lr=optargs['lr'], amsgrad=True)
 
             log = []
             for t in range(epochs):
@@ -152,6 +153,10 @@ def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show
             mean = last_logs.mean().item()
             stdev = last_logs.std().item()
         has_converged = [x < convergence_limit and x < (mean + stdev) for x in last_logs]
+        if has_converged.count(True) > converged_count:
+            mean = last_logs.mean().item()
+            stdev = last_logs.std().item()
+            converged_count = has_converged.count(True)
         if verbose:
             print(f"{has_converged.count(True)}/{ensemble.no_models} converged"
                   f"{', retrying... ' if has_converged.count(True) != ensemble.no_models else ''}")
@@ -164,6 +169,7 @@ def train_ensemble(ensemble, training, test, epochs, verbose: bool = False, show
         plt.show()
 
     with torch.no_grad():
+        ensemble.eval()
         test_labels_pred, _ = ensemble(test_feats)
         training_labels_pred, _ = ensemble(training_feats)
 
@@ -209,14 +215,14 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
         train_scores[cv_idx] = train_score
         test_scores[cv_idx] = test_score
         ensembles.append(ensemble)
-        importances[cv_idx] = ensemble.importance()
+        importances[cv_idx] = ensemble.importance(cv_training_feats[cv_idx], cv_test_feats[cv_idx], relative=True)
         if verbose:
             print(f"Importances: {importances[cv_idx]}")
 
     avg_importances = importances.mean(dim=0)
-    avg_importances /= avg_importances.max()
+    std_importances = importances.std(dim=0)
     if show_importances:
-        plt.bar(avg_importances)
+        plt.bar(avg_importances, yerr=std_importances)
         plt.show()
 
     masked_train = remove_minmax(train_scores)
@@ -226,6 +232,7 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
             'training_scores': train_scores.tolist(),
             'test_scores': test_scores.tolist(),
             'average_importances': avg_importances.tolist(),
+            'stdev_importances': std_importances.tolist(),
             'training_average': train_scores.mean().item(),
             'masked_training_average': masked_train.mean().item(),
             'test_average': test_scores.mean().item(),
@@ -279,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--logx", action="store_true", help="Use log(x/D) as a feature instead of x/D")
     parser.add_argument("--comment", type=str, help="Comment to save in the run log", default="")
     parser.add_argument("--filter", type=str, help="Data filter [cylindrical/shaped]", default=None)
+    parser.add_argument("--params", type=str, help="Comma separated list of flow parameters", default="AR,W/D,Re,Ma,VR,BR")
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -293,8 +301,10 @@ if __name__ == "__main__":
     print(f"Using {device} device")
 
 
+
     db = CoolingDatabase(Path(args.directory))
-    flow_params = ["P/D", "W/P", "BR", "AR"]
+    flow_params = args.params.split(",")
+    feat_names = Figure.feature_names(flow_params)
     epochs = args.epochs
     nodes = args.nodes
     no_hidden = args.hidden
@@ -308,6 +318,9 @@ if __name__ == "__main__":
     print(f"Using variables {flow_params}\n"
           f"Running for {epochs} epochs, with network layers: {layers}\n")
 
+    optargs = {
+        'conv_limit': 0.002
+    }
     # Use normal test-train split for plotting purposes
     db.generate_dataset(training_min, test_min, flow_param_list=flow_params, data_filter=data_filter)
     training_feats, training_labels = db.get_dataset()
@@ -345,14 +358,15 @@ if __name__ == "__main__":
     print(f"Running {cv_count}-fold cross-validation")
 
     cv_ensembles, cv_results = cross_validation((cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels),
-                                                epochs, layers, stats=True, verbose=True, show_loss=args.loss)
+                                                epochs, layers, stats=True, verbose=True, show_loss=args.loss, optargs=optargs)
     print(f"\r{nodes:03}/{len(cv_training_feats):02} nodes, "
           f"avg. training score: {cv_results['masked_training_average']:.3g} "
           f"σ = {cv_results['masked_training_stdev']:.3g}, "
           f"avg. test score: {cv_results['masked_test_average']:.3g} "
           f"σ = {cv_results['masked_test_stdev']:.3g}")
     print(f"All training scores: {cv_results['training_scores']}\nAll test scores: {cv_results['test_scores']}")
-    print(f"Average relative feature importances: {cv_results['average_importances']}")
+    print(f"Average feature importances: {dict(zip(feat_names,cv_results['average_importances']))}")
+    print(f"Std. deviation of feature importances: {dict(zip(feat_names, cv_results['stdev_importances']))}")
 
     training_feats = sc.fit_transform(torch.from_numpy(training_feats).float().to(device), dim=0)
     training_labels = torch.from_numpy(training_labels).float().to(device)
@@ -372,13 +386,14 @@ if __name__ == "__main__":
     print(f"Training score: {train_main_score:.3g}, " 
           f"Test score: {test_main_score:.3g}")
 
-    with torch.no_grad():
-        post_mean, post_std = ensemble(test_feats)
-        plot_true_predicted(test_labels[:, 0], post_mean[:, 0], predicted_err=post_std[:, 0], title="Posterior")
+    if args.plot:
+        with torch.no_grad():
+            post_mean, post_std = ensemble(test_feats)
+            plot_true_predicted(test_labels[:, 0], post_mean[:, 0], predicted_err=post_std[:, 0], title="Posterior")
 
     log_dict = {
         'id': RUN_ID,
-        'date': datetime.utcfromtimestamp(RUN_ID).strftime("%Y-%m-%d %H:%M:%S"),
+        'date': datetime.utcfromtimestamp(int(RUN_ID)).strftime("%Y-%m-%d %H:%M:%S"),
         'training_minimum': training_min,
         'test_minimum': test_min,
         'training_count': len(training_feats),
