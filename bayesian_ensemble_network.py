@@ -4,6 +4,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from captum.attr import DeepLift,IntegratedGradients, NoiseTunnel, FeatureAblation, GradientShap
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -69,11 +70,21 @@ class BayesianNetwork(torch.nn.Module):
 
         return loss_unnorm
 
-    def importance(self):
-        if len(self.layers) != 2:
-            raise ValueError("Feature importance only defined for networks with exactly 1 hidden layer")
-        with torch.no_grad():
-            return torch.squeeze(torch.matmul(self.stack[2].weight.data.abs(), self.stack[0].weight.abs()))
+    def importance(self, train, test, norm: bool = True):
+        is_training_at_start = self.training
+        if self.training:
+            self.eval()
+
+        dl = DeepLift(self)
+        dl_attr_test = dl.attribute(test)
+        dl_sum = dl_attr_test.detach().sum(dim=0)
+        dl_norm_sum = dl_sum / torch.linalg.norm(dl_sum, ord=1)
+        if is_training_at_start:
+            self.train()
+        if norm:
+            return dl_norm_sum
+        else:
+            return dl_sum
 
     def forward(self, x):
         return self.stack(x)
@@ -110,21 +121,28 @@ class BayesianNetworkEnsemble:
             else:
                 return pred_mean, pred_std
 
-    def importance(self, relative: bool = False, return_std: bool = False) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
+    def importance(self, train, test, relative: bool = False, return_std: bool = False) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
         importances = torch.empty((self.no_models, self.in_features))
         for i in range(self.no_models):
-            importances[i] = self.models[i].importance()
+            importances[i] = self.models[i].importance(train, test, norm=False)
         avg = importances.mean(dim=0)
         std = importances.std(dim=0)
         if relative:
-            max_importance = avg.max()
-            avg /= max_importance
-            std /= max_importance
+            norm = torch.linalg.norm(avg, ord=1)
+            avg /= norm
+            std /= norm
         if return_std:
             return avg, std
         else:
             return avg
 
+    def train(self):
+        for model in self.models:
+            model.train()
+
+    def eval(self):
+        for model in self.models:
+            model.eval()
 
 
 def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
