@@ -361,6 +361,16 @@ class Figure:
                 self.__rhoinf = self.__Reinf * mu_inf_temp / (self.__Vinf * self.__D)
             self.__rhoc = self.__DR * self.__rhoinf
 
+    def __heat_capacity_ratio(self):
+        """Returns the coolant to mainstream isobaric heat capacity (cp) ratio"""
+        cp_coolant = CoolProp.PropsSI("Cp0mass", "T", self.__Tc, "D", self.__rhoc, self.__coolant)
+        cp_mainstream = CoolProp.PropsSI("Cp0mass", "T", self.__Tinf, "D", self.__rhoinf, self.__mainstream)
+
+        return cp_coolant / cp_mainstream
+
+    def __get_er(self):
+        return self.__BR * self.__heat_capacity_ratio()
+
     def __viscosity_ratio(self):
         """Returns the coolant to mainstream flow kinematic viscosity ratio"""
 
@@ -475,6 +485,7 @@ class Figure:
         AR, _, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
         P_D = self.__P_D
         W_P = W_D / P_D
+        L_D = self.__L_D
         Alpha = self.__alpha
         Beta = np.sin(np.radians(self.__beta))
         Re = self.get_reynolds()
@@ -482,10 +493,15 @@ class Figure:
         Tu = self.__Tu
         VR = self.get_velocity_ratio()
         BR = self.__BR
+        BR_normal = self.__BR * np.sin(np.radians(self.__alpha))
+        BR_perpendicular = self.__BR * np.sin(np.radians(self.__alpha))
         DR = self.__DR
         IR = self.__IR
+        IR_eff = IR / (AR * AR)
         IR_normal = self.__IR * np.sin(np.radians(self.__alpha))
         IR_perpendicular = self.__IR * np.sin(np.radians(self.__beta))
+        ER = self.__get_er()
+        TR = self.__TR
         Single_hole = 1 if self.__is_single_hole else -1
         x_D = self.__x_D
         eff = self.__eff
@@ -509,6 +525,8 @@ class Figure:
             features.append(W_P)
         if any(param_string.lower() in ["p/d", "p_d"] for param_string in flow_param_list ):
             features.append(P_D)
+        if any(param_string.lower() in ["l/d", "l_d"] for param_string in flow_param_list ):
+            features.append(L_D)
         if any(param_string.lower() in ["alpha"] for param_string in flow_param_list ):
             features.append(Alpha)
         if any(param_string.lower() in ["beta", "compound angle", "orientation angle"] for param_string in flow_param_list ):
@@ -523,14 +541,24 @@ class Figure:
             features.append(VR)
         if any(param_string.lower() in ["br", "blowing ratio"] for param_string in flow_param_list ):
             features.append(BR)
+        if any(param_string.lower() in ["br normal", "br_normal", "normal blowing ratio"] for param_string in flow_param_list ):
+            features.append(BR_normal)
+        if any(param_string.lower() in ["br perpendicular", "br_perpendicular" "perpendicular blowing ratio"] for param_string in flow_param_list ):
+            features.append(BR_perpendicular)
         if any(param_string.lower() in ["dr", "density ratio"] for param_string in flow_param_list ):
             features.append(DR)
         if any(param_string.lower() in ["ir", "momentum flux ratio"] for param_string in flow_param_list ):
             features.append(IR)
-        if any(param_string.lower() in ["ir normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
+        if any(param_string.lower() in ["ir eff", "ir_eff", "effective momentum flux ratio"] for param_string in flow_param_list ):
+            features.append(IR_eff)
+        if any(param_string.lower() in ["ir normal", "ir_normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
             features.append(IR_normal)
-        if any(param_string.lower() in ["ir perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
+        if any(param_string.lower() in ["ir perpendicular", "ir_perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
             features.append(IR_perpendicular)
+        if any(param_string.lower() in ["er"] for param_string in flow_param_list ):
+            features.append(ER)
+        if any(param_string.lower() in ["tr"] for param_string in flow_param_list ):
+            features.append(TR)
         if any(param_string.lower() in ["single", "single hole", "is single hole"] for param_string in flow_param_list):
             features.append(Single_hole)
 
@@ -606,10 +634,18 @@ class Figure:
         if flow_param_list is None:
             return ["Area ratio", "Coverage ratio", "Reynolds number", "Mach number", "Velocity ratio", "Horizontal position over diameter"]
         else:
-            if any(param_string.lower() in ["ar", "area ratio"] for param_string in flow_param_list ):
+            if any(param_string.lower() in ["ar", "area ratio"] for param_string in flow_param_list):
                 name_list.append("Area ratio")
-            if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list ):
+            if any(param_string.lower() in ["w/d", "w_d", "coverage ratio"] for param_string in flow_param_list):
                 name_list.append("Coverage ratio")
+            if any(param_string.lower() in ["w/p", "w_p"] for param_string in flow_param_list):
+                name_list.append("W/P")
+            if any(param_string.lower() in ["p/d", "p_d"] for param_string in flow_param_list):
+                name_list.append("P/D")
+            if any(param_string.lower() in ["l/d", "l_d"] for param_string in flow_param_list):
+                name_list.append("L/D")
+            if any(param_string.lower() in ["alpha"] for param_string in flow_param_list):
+                name_list.append("Inclination angle")
             if any(param_string.lower() in ["beta", "compound angle", "orientation angle"] for param_string in flow_param_list):
                 name_list.append("Compound angle")
             if any(param_string.lower() in ["re", "reynolds", "reynolds number"] for param_string in flow_param_list ):
@@ -622,14 +658,24 @@ class Figure:
                 name_list.append("Velocity ratio")
             if any(param_string.lower() in ["br", "blowing ratio"] for param_string in flow_param_list ):
                 name_list.append("Blowing ratio")
+            if any(param_string.lower() in ["br normal", "br_normal", "normal blowing ratio"] for param_string in flow_param_list ):
+                name_list.append("Blowing ratio normal to wall")
+            if any(param_string.lower() in ["br perpendicular", "br_perpendicular", "perpendicular blowing ratio"] for param_string in flow_param_list ):
+                name_list.append("Blowing ratio perpendicular to wall")
             if any(param_string.lower() in ["dr", "density ratio"] for param_string in flow_param_list ):
                 name_list.append("Density ratio")
             if any(param_string.lower() in ["ir", "momentum flux ratio"] for param_string in flow_param_list ):
                 name_list.append("Momentum flux ratio")
-            if any(param_string.lower() in ["ir normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
+            if any(param_string.lower() in ["ir eff","ir_eff", "effective momentum flux ratio"] for param_string in flow_param_list ):
+                name_list.append("Effective momentum flux ratio")
+            if any(param_string.lower() in ["ir normal", "ir_normal", "normal momentum flux ratio"] for param_string in flow_param_list ):
                 name_list.append("Momentum flux ratio normal to wall")
-            if any(param_string.lower() in ["ir perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
+            if any(param_string.lower() in ["ir perpendicular", "ir_perpendicular", "perpendicular momentum flux ratio"] for param_string in flow_param_list ):
                 name_list.append("Momentum flux ratio perpendicular to wall")
+            if any(param_string.lower() in ["er"] for param_string in flow_param_list ):
+                name_list.append("Specific heat capacity flux ratio")
+            if any(param_string.lower() in ["tr"] for param_string in flow_param_list ):
+                name_list.append("Temperature ratio")
             if any(param_string.lower() in ["single", "single hole", "is single hole"] for param_string in flow_param_list ):
                 name_list.append("Is single hole? Larger value means yes")
 
