@@ -10,13 +10,13 @@ import fcdb
 
 if __name__ == "__main__":
     db = fcdb.CoolingDatabase(Path("data"))
-    flow_params_cylinder = ["alpha", "P_D", "BR", "DR", "Tu", "Re"]
+    flow_params_cylinder = ["P_D", "alpha", "Tu", "BR", "DR"]
     flow_params_shaped = ["AR", "BR", "P_D", "W_P"]
     is_logx = True
     cv_count = 10
-    epochs = 150
+    epochs = 200
     layers = [100, 1]
-    loss = True
+    loss = False
     nodes = 100
     db.generate_dataset(12500, 0, flow_param_list=flow_params_cylinder, data_filter="cylindrical")
     (cv_training_feats_cyl, cv_training_labels_cyl), (cv_test_feats_cyl, cv_test_labels_cyl) = db.get_crossvalidation_sets(cv_count, padding="random")
@@ -62,12 +62,17 @@ if __name__ == "__main__":
     # sc_sk = StandardScaler()
     print(f"Running {cv_count}-fold cross-validation")
 
+    optargs = {
+        'lr': 0.0001,
+        'batch_size': 100,
+        'conv_limit': 0.001
+    }
 
     print("*** Cylindrical holes ***")
     cv_ensembles_cyl, cv_results_cyl = cross_validation((cv_training_feats_cyl, cv_training_labels_cyl), (cv_test_feats_cyl, cv_test_labels_cyl),
-                                                        epochs, layers, stats=True, verbose=True, show_loss=loss)
+                                                        epochs, layers, stats=True, verbose=True, show_loss=loss, optargs=optargs)
     print("*** Shaped holes ***")
-    cv_ensembles_shp, cv_results_shp = cross_validation((cv_training_feats_cyl, cv_training_labels_cyl), (cv_test_feats_cyl, cv_test_labels_cyl),
+    cv_ensembles_shp, cv_results_shp = cross_validation((cv_training_feats_shp, cv_training_labels_shp), (cv_test_feats_shp, cv_test_labels_shp),
                                                         epochs, layers, stats=True, verbose=True, show_loss=loss)
     print("*** Cylindrical holes ***")
     print(f"\r{nodes:03}/{len(cv_training_feats_cyl):02} nodes, "
