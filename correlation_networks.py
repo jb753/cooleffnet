@@ -12,15 +12,14 @@ if __name__ == "__main__":
     db = fcdb.CoolingDatabase(Path("data"))
     flow_params_cylinder = ["P_D", "alpha", "Tu", "BR", "DR"]
     flow_params_shaped = ["AR", "BR", "P_D", "W_P"]
-    is_logx = True
     cv_count = 10
     epochs = 200
     layers = [100, 1]
     loss = False
     nodes = 100
-    db.generate_dataset(12500, 0, flow_param_list=flow_params_cylinder, data_filter="cylindrical")
+    db.generate_dataset(12500, 0, flow_param_list=flow_params_cylinder, data_filter="cylindrical", x_norm="log")
     (cv_training_feats_cyl, cv_training_labels_cyl), (cv_test_feats_cyl, cv_test_labels_cyl) = db.get_crossvalidation_sets(cv_count, padding="random")
-    db.generate_dataset(12500, 0, flow_param_list=flow_params_shaped, data_filter="shaped")
+    db.generate_dataset(12500, 0, flow_param_list=flow_params_shaped, data_filter="shaped", x_norm="log")
     (cv_training_feats_shp, cv_training_labels_shp), (cv_test_feats_shp, cv_test_labels_shp) = db.get_crossvalidation_sets(cv_count, padding="random")
 
     device = "cpu"
@@ -45,12 +44,6 @@ if __name__ == "__main__":
     cv_test_feats_shp = torch.from_numpy(cv_test_feats_shp).float().to(device)
     cv_test_labels_shp = torch.from_numpy(cv_test_labels_shp).float().to(device)
 
-    # Log x/D
-    if is_logx:
-        cv_training_feats_cyl[:, :, -1] = torch.log(cv_training_feats_cyl[:, :, -1])
-        cv_test_feats_cyl[:, :, -1] = torch.log(cv_test_feats_cyl[:, :, -1])
-        cv_training_feats_shp[:, :, -1] = torch.log(cv_training_feats_shp[:, :, -1])
-        cv_test_feats_shp[:, :, -1] = torch.log(cv_test_feats_shp[:, :, -1])
     ensemble = None
     sc_cyl = CustomStandardScaler()
     cv_training_feats_cyl = sc_cyl.fit_transform(cv_training_feats_cyl, dim=1)

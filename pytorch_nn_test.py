@@ -283,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--nodes", type=int, help="Number of nodes in each hidden layer", default=100)
     parser.add_argument("--cv", type=int, help="Number of cross-validation sets", default=5)
     parser.add_argument("--hidden", type=int, help="Number of hidden layers", default=1)
-    parser.add_argument("--logx", action="store_true", help="Use log(x/D) as a feature instead of x/D")
+    parser.add_argument("--xnorm", type=str, help="Transform x/D some way", choices=["log", "reciprocal"])
     parser.add_argument("--comment", type=str, help="Comment to save in the run log", default="")
     parser.add_argument("--filter", type=str, help="Data filter [cylindrical/shaped]", default=None)
     parser.add_argument("--params", type=str, help="Comma separated list of flow parameters", default="AR,W/D,Re,Ma,VR,BR")
@@ -304,7 +304,7 @@ if __name__ == "__main__":
 
     db = CoolingDatabase(Path(args.directory))
     flow_params = args.params.split(",")
-    feat_names = Figure.feature_names(flow_params)
+    feat_names = Figure.feature_names(list(map(Figure.to_param, flow_params)))
     epochs = args.epochs
     nodes = args.nodes
     no_hidden = args.hidden
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     training_min = 10000
     test_min = 2000
     data_filter = args.filter
-    is_logx = args.logx
+    x_norm = args.xnorm if 'xnorm' in args else None
 
     print(f"Using variables {flow_params}\n"
           f"Running for {epochs} epochs, with network layers: {layers}\n")
@@ -322,14 +322,14 @@ if __name__ == "__main__":
         'conv_limit': 0.002
     }
     # Use normal test-train split for plotting purposes
-    db.generate_dataset(training_min, test_min, flow_param_list=flow_params, data_filter=data_filter)
+    db.generate_dataset(training_min, test_min, flow_param_list=flow_params, data_filter=data_filter, x_norm=x_norm)
     training_feats, training_labels = db.get_dataset()
     test_feats, test_labels = db.get_dataset(test=True)
     training_files = db.get_files()
     test_files = db.get_files(test=True)
 
     # Use entire dataset for cross validation
-    db.generate_dataset(12000, 0, flow_param_list=flow_params, data_filter=data_filter)
+    db.generate_dataset(12000, 0, flow_param_list=flow_params, data_filter=data_filter, x_norm=x_norm)
     (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(cv_count, padding="random")
 
     cv_training_feats = np.stack(cv_training_feats)
@@ -343,12 +343,6 @@ if __name__ == "__main__":
     cv_test_feats = torch.from_numpy(cv_test_feats).float().to(device)
     cv_test_labels = torch.from_numpy(cv_test_labels).float().to(device)
 
-    # Log x/D
-    if is_logx:
-        cv_training_feats[:, :, -1] = torch.log(cv_training_feats[:, :, -1])
-        cv_test_feats[:, :, -1] = torch.log(cv_test_feats[:, :, -1])
-        training_feats[:, -1] = np.log(training_feats[:, -1])
-        test_feats[:, -1] = np.log(test_feats[:, -1])
     # Scaling bit dodgy due to padding with zeros, TODO: fix later...
     ensemble = None
     sc = CustomStandardScaler()
@@ -402,7 +396,7 @@ if __name__ == "__main__":
         'test_files': sorted([f.name for f in test_files]),
         'input_parameters': flow_params + ['x_D'],
         'filter': data_filter,
-        'is_logx': is_logx,
+        'x_norm': x_norm,
         'no_nodes': nodes,
         'no_hidden': no_hidden,
         'epochs': epochs,
@@ -422,7 +416,8 @@ if __name__ == "__main__":
     if args.plot:
         for file in test_files:
             f = Figure(file)
-            feats, labels = f.get_feature_label_maps(flow_param_list=flow_params)
+            feats, labels = f.get_feature_label_maps(flow_param_list=flow_params, x_norm=x_norm)
+            feats_to_plot, _ = f.get_feature_label_maps(flow_param_list=flow_params, x_norm=None)
             study_name = file.name.split('_')[0]
             is_study_in_training = any(x.name.startswith(study_name) for x in training_files)
             corr_xs, corr_effs = f.get_correlations()
@@ -430,38 +425,18 @@ if __name__ == "__main__":
 
             fig.set_tight_layout(True)
             scores = []
-            for feat, label, ax, corr_x, corr_eff in zip(feats, labels, np.atleast_1d(axes), corr_xs, corr_effs):
+            for feat, feat_plot, label, ax, corr_x, corr_eff in zip(feats, feats_to_plot, labels, np.atleast_1d(axes), corr_xs, corr_effs):
 
-                # feat_scaled = torch.from_numpy(sc_sk.transform(feat)).float()
-
-                # Resample if less than 10 datapoints
-                resample_forplot = len(feat) < 10
                 feat_torched = torch.from_numpy(feat).float()
-                feat_to_plot = feat_torched.detach().clone()
-                if resample_forplot:
-                    min_x = torch.min(feat_torched[:, -1]).item()
-                    max_x = torch.max(feat_torched[:, -1]).item()
-                    no_dims = feat_torched.size(dim=1)
-                    feat_to_plot = torch.tile(feat_torched[0], (10, 1))
-                    feat_to_plot[:, -1] = torch.linspace(min_x, max_x, 10)
 
-                if is_logx:
-                    feat_to_plot[:, -1] = torch.log(feat_to_plot[:, -1])
-                    feat_torched[:, -1] = torch.log(feat_torched[:, -1])
-                feat_to_plot_scaled = (feat_to_plot - sc.mean[-1]) / sc.std[-1]
-                feat_scaled = (feat_torched - sc.mean[-1]) / sc.std[-1]
+                feat_scaled = sc.transform(feat_torched)
 
                 label_pred_mean, label_pred_std = ensemble(feat_scaled)
 
-                label_toplot_mean, label_toplot_std = label_pred_mean.detach().clone(), label_pred_std.detach().clone()
-                if resample_forplot:
-                    label_toplot_mean, label_toplot_std = ensemble(feat_to_plot_scaled)
-                upper, lower = label_toplot_mean + 2 * label_toplot_std, label_toplot_mean - 2 * label_toplot_std
-                if is_logx:
-                    feat_to_plot[:, -1] = torch.exp(feat_to_plot[:, -1])
-                ax.errorbar(feat[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
-                ax.plot(feat_to_plot[:, -1], label_toplot_mean[:, 0], color="orange", label="NN predicted")
-                ax.fill_between(feat_to_plot[:, -1], upper[:, 0], lower[:, 0], alpha=0.4, label="95% confidence")
+                upper, lower = label_pred_mean + 2 * label_pred_std, label_pred_mean - 2 * label_pred_std
+                ax.errorbar(feat_plot[:, -1], label, yerr=f.get_eff_uncertainty(), fmt="o", label="True value", markersize=3)
+                ax.plot(feat_plot[:, -1], label_pred_mean[:, 0], color="orange", label="NN predicted")
+                ax.fill_between(feat_plot[:, -1], upper[:, 0], lower[:, 0], alpha=0.4, label="95% confidence")
                 ax.plot(corr_x, corr_eff, color="green", label="Correlation")
                 curr_score = torch.sqrt(score(torch.squeeze(label_pred_mean), torch.from_numpy(label).float()))
                 scores.append(curr_score)
@@ -472,7 +447,7 @@ if __name__ == "__main__":
 
             fig.suptitle(f"{f}, filter: {data_filter}\n"
                          f"Parameters used: {flow_params}, NN layers: {ensemble.layers}, "
-                         f"$\log{{x/D}}$ as feature? {'Yes' if is_logx else 'No'}\n"
+                         f"x/D normalisation: {x_norm}\n"
                          f"{args.comment}\n"
                          f"Is same study in training set? {'Yes' if is_study_in_training else 'No'}\n"
                          f"Average MSE: {sum(scores)/len(scores):.3g}")
