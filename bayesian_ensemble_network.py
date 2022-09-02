@@ -10,11 +10,12 @@ from torch.utils.data import Dataset, DataLoader
 
 class BayesianNetwork(torch.nn.Module):
 
-    def __init__(self, in_features, layers: Sequence[int], data_noise: float):
+    def __init__(self, in_features, layers: Sequence[int], data_noise: float, dropout_prob: float = None):
         super(BayesianNetwork, self).__init__()
         if len(layers) < 1:
             raise ValueError("Network needs at least an output layer")
 
+        self.dropout_prob = dropout_prob
         self.data_noise = data_noise
         self.layers = layers
         # Create linear stack
@@ -23,13 +24,13 @@ class BayesianNetwork(torch.nn.Module):
         for i in range(len(layers)):
             if i == 0:
                 self.stack.append(torch.nn.Linear(in_features, layers[i]))
-                self.stack.append(torch.nn.ReLU())
             elif i == (len(layers) - 1):
                 self.stack.append(torch.nn.Linear(layers[i - 1], layers[i], bias=False))
-                self.stack.append(torch.nn.ReLU())
             else:
                 self.stack.append(torch.nn.Linear(layers[i - 1], layers[i]))
-                self.stack.append(torch.nn.ReLU())
+            self.stack.append(torch.nn.ReLU())
+            if self.dropout_prob is not None:
+                self.stack.append(torch.nn.Dropout(dropout_prob))
 
         self.__init_variances = torch.Tensor(len(layers))
         self.__lambdas = torch.Tensor(len(layers))
@@ -43,7 +44,7 @@ class BayesianNetwork(torch.nn.Module):
         # self.__init_variances = [1.0 / layer.in_features for i, layer in enumerate(self.stack) if i % 2 == 0] # Tune 1.0
         # self.__lambdas = self.__init_variances / self.data_noise
         for i, layer in enumerate(self.layers):
-            linear_idx = i * 2
+            linear_idx = i * 2 if self.dropout_prob is None else i * 3
             mean_biases = torch.zeros(layer)
             mean_weights = torch.zeros_like(self.stack[linear_idx].weight.data)
             self.__init_variances[i] = 1.0 / self.stack[linear_idx].in_features
@@ -63,7 +64,7 @@ class BayesianNetwork(torch.nn.Module):
         """Returns the total regularization term, before normalisation by the number of samples"""
         loss_unnorm = 0
         for i in range(len(self.layers)):
-            linear_idx = i * 2
+            linear_idx = i * 2 if self.dropout_prob is None else i * 3
             loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].weight.data - self.__init_weights[i])) * self.__lambdas[i]
             if i != (len(self.layers) - 1):
                 loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].bias.data - self.__init_biases[i])) * self.__lambdas[i]
@@ -92,8 +93,8 @@ class BayesianNetwork(torch.nn.Module):
 
 class BayesianNetworkEnsemble:
 
-    def __init__(self, in_features: int, layers: Sequence[int], noise_variance, no_models: int = 10):
-        self.models = [BayesianNetwork(in_features, layers, noise_variance) for _ in range(no_models)]
+    def __init__(self, in_features: int, layers: Sequence[int], noise_variance, dropout_prob: float = None, no_models: int = 10):
+        self.models = [BayesianNetwork(in_features, layers, noise_variance, dropout_prob) for _ in range(no_models)]
         self.in_features = in_features
         self.layers = layers
         self.noise_variance = noise_variance
