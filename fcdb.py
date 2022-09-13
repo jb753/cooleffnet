@@ -3,7 +3,7 @@ import json
 import math
 import random
 from pathlib import Path
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, List
 
 import numpy as np
 import CoolProp.CoolProp as CoolProp
@@ -18,14 +18,27 @@ def to_array(parameter, length):
         if len(parameter) == length:
             return parameter
         else:
-            raise ValueError(f"Parameter in list form with length {len(parameter)}, which does not match desired length {length}")
+            raise ValueError(f"Parameter in list form with length {len(parameter)}, "
+                             f"which does not match desired length {length}")
     else:
         return np.full(length, parameter)
 
 
 class CoolingDatabase:
 
-    def __init__(self, database_dir: Path, verbose: bool=False):
+    def __init__(self, database_dir: Path, verbose: bool = False):
+        """
+        An object to generate training and test datasets or cross-validation datasets from
+        a set of JSON measurement data files.
+        Generate dataset first by calling generate_dataset() on the database object.
+
+        Parameters
+        ----------
+        database_dir: Path
+            Path object pointing to the directory containing the JSON measurement data files
+        verbose: bool, optional
+            Boolean flag controlling verbosity (default False)
+        """
         self.__datafiles = [f for f in database_dir.iterdir() if f.is_file() and f.suffix == ".json"]
         self.__verbose = verbose
         self.__dataset_generated = False
@@ -43,6 +56,30 @@ class CoolingDatabase:
     def generate_dataset(self, training_min: int, test_min: int, unique_params: bool = False, shuffle: bool = True,
                          flow_param_list: Sequence[str] = None, include_correlations: bool = False,
                          data_filter: str = None, x_norm: str = None):
+        """
+        Generates training and test datasets,  so they can be queried with get_dataset() or get_crossvalidation_sets()
+
+        Parameters
+        ----------
+        training_min : int
+            Minimum number of examples in training set
+        test_min : int
+            Minimum number of examples in test set
+        unique_params : bool, optional
+            Boolean flag controlling whether only unique combinations of flow parameters should be included
+            (default False)
+        shuffle : bool, optional
+            Boolean flag controlling whether individual curves should be shuffled (default True)
+        flow_param_list : iterable of str, default: ["AR", "W/D", "Re", "Ma", "VR"]
+            Parameters to be included in features
+        include_correlations : bool, optional
+            Boolean flag controlling whether correlation results should be included as a second column of labels
+        data_filter : { "cylindrical", "shaped" }, optional
+            Filters data based on hole shape
+        x_norm : { "log", "reciprocal" }, optional
+            Applies transformation to x/D. `log` takes the logarithm of x/D
+            while `reciprocal` uses 1/(x/D) * ER/(P/D)
+        """
         if flow_param_list is None:
             flow_param_list = ["AR", "W/D", "Re", "Ma", "VR"]
 
@@ -115,8 +152,25 @@ class CoolingDatabase:
         self.__dataset_generated = True
 
     def split_training(self, no_splits: int, padding: str = None) -> Tuple[Sequence[np.ndarray], Sequence[np.ndarray]]:
+        """
+        Generates roughly (or exactly depending on padding) equal lists of datapoints from the training datasets,
+        so that one curve does not get split into two
+        Parameters
+        ----------
+        no_splits : int
+            Number of splits
+        padding : { "min", "max", "random" }, optional
+            If not None then makes the splits equal length, by some method of truncating or padding.
+            See `get_crossvalidation_sets()` for details
+        Returns
+        -------
+        tuple
+            A tuple of two lists containing 2D arrays of features and labels respectively
+        """
         if not self.__dataset_generated:
             raise RuntimeError("Requested training dataset without calling generate_dataset() before")
+        if no_splits < 2:
+            raise ValueError("Number of splits should be at least 2, otherwise no need to split data")
         target = self.__training_total // no_splits
         feat_sets, label_sets = [], []
 
@@ -147,9 +201,11 @@ class CoolingDatabase:
         feat_sets.append(curr_feat_set)
         label_sets.append(curr_label_set)
 
-        # FIXME: Potentially throwing away data...
-        feat_sets = feat_sets[:no_splits]
-        label_sets = label_sets[:no_splits]
+        while len(feat_sets) > no_splits:
+            feat_sets[-2] = feat_sets[-2] + feat_sets[-1]
+            feat_sets.pop()
+            label_sets[-2] = label_sets[-2] + label_sets[-1]
+            label_sets.pop()
 
         lengths = [sum(len(y) for y in x) for x in feat_sets]
         if padding == "max":
@@ -170,7 +226,6 @@ class CoolingDatabase:
             feat_sets = [x[:min_set_size] for x in feat_sets]
             label_sets = [x[:min_set_size] for x in label_sets]
 
-
         if padding == "random":
             largest_set_size = max(lengths)
             for i, (feat_set, label_set, length) in enumerate(zip(feat_sets, label_sets, lengths)):
@@ -184,9 +239,30 @@ class CoolingDatabase:
 
         return feat_sets, label_sets
 
-    def get_crossvalidation_sets(self, no_splits: int = 5, padding: str = None):
+    def get_crossvalidation_sets(self, no_splits: int = 5, padding: str = None) \
+            -> Tuple[Tuple[List[np.ndarray], List[np.ndarray]], Tuple[List[np.ndarray], List[np.ndarray]]]:
+        """
+        Generates lists of matrices to be used in cross-validation.
+        Parameters
+        ----------
+        no_splits : int, default : 5
+            Number of cross-validation sets
+        padding : { "min", "max", "random" }, optional
+            If not None then makes the splits equal length, by some method of truncating or padding.
+            `min` truncates every split that is longer than the shortest
+            `max` pads every split that is smaller than the largest with all features and labels being 0.
+            `random` pads every split that is smaller than the largest with repeating random already existing examples.
+
+        Returns
+        -------
+        tuple
+            A tuple of two tuples containing lists of 2D matrices of features and labels
+            for training and test respectively
+        """
         if not self.__dataset_generated:
             raise RuntimeError("Requested cross-validation dataset without calling generate_dataset() before")
+        if no_splits < 2:
+            raise ValueError("Number of cross-validation sets should be at least 2")
         feat_splits, label_splits = self.split_training(no_splits, padding)
 
         cv_train_feats, cv_train_labels = [], []
@@ -212,8 +288,20 @@ class CoolingDatabase:
         return (cv_train_feats, cv_train_labels), (cv_test_feats, cv_test_labels)
 
     # TODO: Rethink this, are there options for making it stateless?
-    def get_dataset(self, test: bool = False, normalize_features = False, normalize_labels=False,
-                     zero_mean_features=False, zero_mean_labels=False, return_stats: bool = False):
+    def get_dataset(self, test: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Function to get the generated training and test datasets.
+        Parameters
+        ----------
+        test: bool, optional
+            If True, returns the test dataset
+
+        Returns
+        -------
+        tuple
+            Tuple of two 2D matrices containing the features and the labels respectively
+
+        """
         if not self.__dataset_generated:
             raise RuntimeError("Requested training dataset without calling generate_dataset() before")
 
@@ -223,32 +311,19 @@ class CoolingDatabase:
         if label_matrix.shape[0] == 1:
             label_matrix = label_matrix.T
 
-        feat_means, feat_stdevs = np.mean(feat_matrix, axis=0), np.std(feat_matrix, axis=0)
-        label_means, label_stdevs = np.mean(label_matrix, axis=0), np.std(label_matrix, axis=0)
-        if zero_mean_features or normalize_features:
-            feat_matrix -= feat_means
-        if zero_mean_labels or normalize_labels:
-            label_matrix -= label_means
+        return feat_matrix, label_matrix
 
-        if normalize_features:
-            feat_matrix /= feat_stdevs
-        if normalize_labels:
-            label_matrix /= label_stdevs
-
-        # stats = feat_means, feat_stdevs, label_means, label_stdevs
-        stats = {
-            'feat_means': feat_means,
-            'feat_stdevs': feat_stdevs,
-            'label_means': label_means,
-            'label_stdevs': label_stdevs
-        }
-
-        if return_stats:
-            return feat_matrix, label_matrix, stats
-        else:
-            return feat_matrix, label_matrix
-
-    def get_files(self, test: bool = False):
+    def get_files(self, test: bool = False) -> List[Path]:
+        """
+        Parameters
+        ----------
+        test: bool, default: False
+            If True returns test files instead of training files.
+        Returns
+        -------
+        list
+            List of Paths pointing to the training or test files
+        """
         if not self.__dataset_generated:
             raise RuntimeError("Requested training dataset without calling generate_dataset() before")
         return self.__test_files if test else self.__training_files
@@ -256,6 +331,7 @@ class CoolingDatabase:
 
 class Figure:
 
+    # Lookup table for aliases for parameters
     __ALIAS_TO_PARAM = {
         "ar": "AR",
         "area ratio": "AR",
@@ -311,6 +387,7 @@ class Figure:
         "is single hole": "Single_hole",
     }
 
+    # Lookup table for readable versions of parameters
     __PARAM_TO_READABLE = {
         "AR": "Area ratio",
         "W_D": "Coverage ratio",
@@ -319,7 +396,7 @@ class Figure:
         "L_D": "L/D",
         "alpha": "Inclination angle",
         "beta": "Compound angle",
-        "Re": "Reynolds numebr",
+        "Re": "Reynolds number",
         "Ma": "Mach number",
         "Tu": "Turbulence intensity",
         "VR": "Velocity ratio",
@@ -335,8 +412,15 @@ class Figure:
         "TR": "Temperature ratio",
         "Single_hole": "Is single hole?",
     }
+
     def __init__(self, file: Path):
-        """Initialises a Figure object from a JSON figure file"""
+        """
+        Initialises a Figure object from a JSON figure file
+        Parameters
+        ----------
+        file: Path
+            A Path object pointing to the JSON measurement data
+        """
 
         with open(file) as figure_file:
             self.__figure_dict = json.load(figure_file)
@@ -371,9 +455,12 @@ class Figure:
             self.__is_x_origin_trailing_edge = self.__figure_dict['geometry']['is_x_origin_trailing_edge']
 
             # Check if Vinf exists
-            self.__Vinf = self.__figure_dict['dimensional']['Vinf'] if 'Vinf' in self.__figure_dict['dimensional'] else None
-            self.__Tc = self.__figure_dict['dimensional']['Tc'] if 'Tc' in self.__figure_dict['dimensional'] else None
-            self.__Tinf = self.__figure_dict['dimensional']['Tinf'] if 'Tinf' in self.__figure_dict['dimensional'] else None
+            self.__Vinf = self.__figure_dict['dimensional']['Vinf'] \
+                if 'Vinf' in self.__figure_dict['dimensional'] else None
+            self.__Tc = self.__figure_dict['dimensional']['Tc'] \
+                if 'Tc' in self.__figure_dict['dimensional'] else None
+            self.__Tinf = self.__figure_dict['dimensional']['Tinf'] \
+                if 'Tinf' in self.__figure_dict['dimensional'] else None
             self.__D = self.__figure_dict['dimensional']['D']
 
             self.__DR = self.__figure_dict['flow']['DR']
@@ -413,14 +500,14 @@ class Figure:
             self.__Minf = CoolProp.PropsSI("molar_mass", self.__mainstream)
 
             self.__MR = self.__Mc / self.__Minf  # Molar mass ratio
-            self.__IR = self.__BR * self.__BR / self.__DR # Momentum flux ratio
+            self.__IR = self.__BR * self.__BR / self.__DR  # Momentum flux ratio
             # Apparently universal gas constant can be different for different fluids in CoolProp
-            # Not very universal anymore, now is it?
+            # Not very universal anymore now, is it?
             self.__Rc = CoolProp.PropsSI("gas_constant", self.__coolant) / self.__Mc
             self.__Rinf = CoolProp.PropsSI("gas_constant", self.__mainstream) / self.__Minf
 
             # Assuming ideal gas
-            self.__TR = self.__MR / self.__DR # Coolant to mainstream temperature ratio
+            self.__TR = self.__MR / self.__DR  # Coolant to mainstream temperature ratio
             if self.__Tc is None:
                 self.__Tc = self.__Tinf * self.__TR
             if self.__Tinf is None:
@@ -460,6 +547,7 @@ class Figure:
             self.__initialise_parameters()
 
     def __initialise_parameters(self):
+        """Initialises self.__parameters with all parameters that can be possibly relevant"""
 
         max_length = len(self.__x_D) if type(self.__x_D) is list else 1
         AR, edge_offset, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
@@ -489,7 +577,6 @@ class Figure:
         self.__parameters['x_D'] = to_array(self.__x_D, max_length)
         self.__parameters['eff'] = to_array(self.__eff, max_length)
 
-
     def __heat_capacity_ratio(self):
         """Returns the coolant to mainstream isobaric heat capacity (cp) ratio"""
         cp_coolant = CoolProp.PropsSI("Cp0mass", "T", self.__Tc, "D", self.__rhoc, self.__coolant)
@@ -498,6 +585,7 @@ class Figure:
         return cp_coolant / cp_mainstream
 
     def __get_er(self):
+        """Returns the advective capacity ratio, defined as blowing ratio * (ratio of specific heat capacities)"""
         return self.__BR * self.__heat_capacity_ratio()
 
     def __viscosity_ratio(self):
@@ -518,6 +606,7 @@ class Figure:
         return self.__BR / self.__DR
 
     def __get_single_correlation(self, AR, P_D, W_P, BR, DR, Tu, alpha, edge_offset, x_D):
+        """Returns the appropriate correlation values for a set of parameters and x/D values"""
         if type(AR) is np.ndarray or \
                 type(P_D) is np.ndarray or \
                 type(W_P) is np.ndarray or \
@@ -533,9 +622,16 @@ class Figure:
             return correlations.baldauf(x_D, alpha, P_D, BR, DR, Tu / 100.0, b_0="fit")
         else:
             # Shaped hole, use Colban's correlation
-            return correlations.colban(x_D - edge_offset,P_D, W_P, BR, AR)
+            return correlations.colban(x_D - edge_offset, P_D, W_P, BR, AR)
 
     def get_correlations(self):
+        """
+        Get curves of film effectiveness-x/D as calculated by the appropriate correlation
+        Returns
+        -------
+        tuple
+            Tuple of lists of x/D and film effectiveness distributions
+        """
         params = ['AR', 'P_D', 'W_P', 'BR', 'DR', 'Tu', 'Alpha', 'edge_offset']
         features = [self.__parameters[param] for param in params]
         features.append(self.__parameters['x_D'])
@@ -551,24 +647,36 @@ class Figure:
         return correlations
 
     def __transform_x(self, transformation: str):
+        """
+        Returns a transformed version of x/D
+        Parameters
+        ----------
+        transformation : {"log", "reciprocal}
+            Type of transformation, see generate_dataset() for more details
+        Returns
+        -------
+        list
+            List of lists of transformed x/D values
+        """
         if transformation == "log":
             return [np.log(x) for x in self.__parameters['x_D']]
         elif transformation == "reciprocal":
-            return [ER / (P_D * x) for x, ER, P_D in zip(self.__parameters['x_D'], self.__parameters['ER'], self.__parameters['P_D'])]
+            return [ER / (P_D * x)
+                    for x, ER, P_D in zip(self.__parameters['x_D'], self.__parameters['ER'], self.__parameters['P_D'])]
         else:
             raise ValueError(f"Invalid x_D transformation {str}, valid values are: \"log\", \"reciprocal\"")
-
 
     def __get_single_feature_label_map(self, flow_params: Sequence[float],
                                        x_D: np.ndarray,
                                        eff: np.ndarray) -> Tuple[Sequence[float], Sequence[float]]:
+        """Generates a feature-label tuple for a single set of flow parameters"""
         # Use list of features instead of parameters?
         # Flow parameters should be a single value, while x_D and eff are ndarrays
         if any(type(flow_param) is np.ndarray or type(flow_param) is list for flow_param in flow_params) or \
                 type(x_D) is list or \
                 type(eff) is list:
             raise ValueError("For a single feature label map, all features should be single values")
-        return np.asarray([[*flow_params,curr_x] for curr_x in x_D]), eff
+        return np.asarray([[*flow_params, curr_x] for curr_x in x_D]), eff
 
     def get_feature_label_maps(self, flow_param_list: Sequence[str] = None, include_correlations: bool = False,
                                data_filter: str = None, x_norm: str = None):
@@ -592,7 +700,12 @@ class Figure:
             DR: "DR", "Density ratio"
             IR: "IR", "Momentum flux ratio"
             Single hole: "Single", "Single hole", "Is single hole"
-
+        include_correlations : bool, optional
+            Controls whether correlation values are included, see generate_dataset() for details
+        x_norm : {"log", "reciprocal"}, optional
+            Transformation of x/D values, see generate_dataset() for details
+        data_filter : {"cylindrical", "shaped"}, optional
+            Filters datasets, see generate_dataset() for details
         Returns
         -------
         feats, labels:
@@ -614,7 +727,7 @@ class Figure:
         features.append(self.__parameters['eff'])
 
         no_dist = len(self.__parameters['x_D'])
-        if not all(len(l) == no_dist for l in features):
+        if not all(len(f) == no_dist for f in features):
             raise ValueError("Feature lists should all have length equal to number of distributions")
 
         feat_label_map = ([], [])
@@ -630,9 +743,11 @@ class Figure:
                 feat_label_map[1][i] = np.stack((feat_label_map[1][i], corr_eff[i]), axis=1)
 
         if data_filter == "shaped":
-            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if is_shaped[i]], [x for i, x in enumerate(feat_label_map[1]) if is_shaped[i]]
+            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if is_shaped[i]], \
+                             [x for i, x in enumerate(feat_label_map[1]) if is_shaped[i]]
         elif data_filter == "cylindrical":
-            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if not is_shaped[i]], [x for i, x in enumerate(feat_label_map[1]) if not is_shaped[i]]
+            feat_label_map = [x for i, x in enumerate(feat_label_map[0]) if not is_shaped[i]], \
+                             [x for i, x in enumerate(feat_label_map[1]) if not is_shaped[i]]
         return feat_label_map
 
     def get_reynolds(self):
@@ -659,10 +774,12 @@ class Figure:
 
     @staticmethod
     def feature_names(flow_param_list: Sequence[str], x_norm: str = None) -> list:
+        """Returns human-readable names of flow parameters"""
         names = [Figure.__PARAM_TO_READABLE[x] for x in flow_param_list]
         names.append(f"Horizontal distance{' (normalisation: ' + x_norm if x_norm is not None else ''}")
         return names
 
     @staticmethod
     def to_param(alias: str) -> str:
+        """Converts an alias of a flow parameter to the proper parameter name"""
         return Figure.__ALIAS_TO_PARAM[alias.lower()]
