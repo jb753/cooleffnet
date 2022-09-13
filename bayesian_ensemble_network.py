@@ -1,16 +1,29 @@
 from typing import Sequence, Tuple
-import math
 
-import numpy as np
-import matplotlib.pyplot as plt
 import torch
-from captum.attr import DeepLift,IntegratedGradients, NoiseTunnel, FeatureAblation, GradientShap
-from torch.utils.data import Dataset, DataLoader
+from captum.attr import DeepLift
 
 
 class BayesianNetwork(torch.nn.Module):
 
-    def __init__(self, in_features, layers: Sequence[int], data_noise: float, dropout_prob: float = None):
+    def __init__(self,
+                 in_features: int,
+                 layers: Sequence[int],
+                 data_noise: float,
+                 dropout_prob: float = None):
+        """
+        A Bayesian neural network subclassed from torch.nn.Module
+        Parameters
+        ----------
+        in_features: int
+            Number of features
+        layers: iterable of int
+            Sizes of layers after the inputs (i.e. sizes of hidden layers and output layer)
+        data_noise: float
+            Noise variance of the input data
+        dropout_prob: float, optional
+            If given then Dropout layers are added with this dropout probability to the model
+        """
         super(BayesianNetwork, self).__init__()
         if len(layers) < 1:
             raise ValueError("Network needs at least an output layer")
@@ -40,10 +53,11 @@ class BayesianNetwork(torch.nn.Module):
         # print("init")
 
     def initialise_from_prior(self):
-        # Even layers are the linear layers
-        # self.__init_variances = [1.0 / layer.in_features for i, layer in enumerate(self.stack) if i % 2 == 0] # Tune 1.0
-        # self.__lambdas = self.__init_variances / self.data_noise
+        """Initialises weights and biases from a prior distribution, based on the implementation in
+        `Bayesian Machine Learning for the Prognosis of Combustion Instabilities From Noise` by Sengupta et al.
+        DOI: https://doi.org/10.1115/1.4049762"""
         for i, layer in enumerate(self.layers):
+            # Linear layers are every second or every third depending on whether Dropout layers are included
             linear_idx = i * 2 if self.dropout_prob is None else i * 3
             mean_biases = torch.zeros(layer)
             mean_weights = torch.zeros_like(self.stack[linear_idx].weight.data)
@@ -55,7 +69,9 @@ class BayesianNetwork(torch.nn.Module):
 
             if i != (len(self.layers) - 1):
                 if i == 0:
-                    self.__init_biases.append(torch.normal(mean_biases, torch.sqrt(self.__init_variances[i] * self.stack[linear_idx].in_features)))
+                    self.__init_biases.append(
+                        torch.normal(mean_biases,
+                                     torch.sqrt(self.__init_variances[i] * self.stack[linear_idx].in_features)))
                 else:
                     self.__init_biases.append(torch.normal(mean_biases, std))
                 self.stack[linear_idx].bias.data = self.__init_biases[-1]
@@ -65,13 +81,28 @@ class BayesianNetwork(torch.nn.Module):
         loss_unnorm = 0
         for i in range(len(self.layers)):
             linear_idx = i * 2 if self.dropout_prob is None else i * 3
-            loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].weight.data - self.__init_weights[i])) * self.__lambdas[i]
+            loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].weight.data - self.__init_weights[i])) \
+                * self.__lambdas[i]
             if i != (len(self.layers) - 1):
-                loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].bias.data - self.__init_biases[i])) * self.__lambdas[i]
+                loss_unnorm += torch.sum(torch.square(self.stack[linear_idx].bias.data - self.__init_biases[i])) \
+                               * self.__lambdas[i]
 
         return loss_unnorm
 
-    def importance(self, train, test, norm: bool = True):
+    def importance(self, test, norm: bool = True):
+        """
+        Returns the importance of each input feature according the DeepLift feature attribution scheme
+        Parameters
+        ----------
+        test : torch.Tensor
+            Test input in a PyTorch Tensor
+        norm: bool, optional
+            If false, then no L1 normalisation is done
+        Returns
+        -------
+        torch.Tensor
+            Importance of each input feature in a PyTorch Tensor
+        """
         is_training_at_start = self.training
         if self.training:
             self.eval()
@@ -93,7 +124,28 @@ class BayesianNetwork(torch.nn.Module):
 
 class BayesianNetworkEnsemble:
 
-    def __init__(self, in_features: int, layers: Sequence[int], noise_variance, dropout_prob: float = None, no_models: int = 10):
+    def __init__(self,
+                 in_features: int,
+                 layers: Sequence[int],
+                 noise_variance: float,
+                 dropout_prob: float = None,
+                 no_models: int = 10):
+        """
+        An ensemble of Bayesian neural networks, with convenient overloads for prediction.
+
+        Parameters
+        ----------
+        in_features : int
+            Number of features, see :py:class:`BayesianNetwork` for more details.
+        layers : iterable of int
+            Sizes of each layers, see :py:class:`BayesianNetwork` for more details.
+        noise_variance : float
+            Noise variance of input data, see :py:class:`BayesianNetwork` for more details.
+        dropout_prob : float, optional
+            Dropout probability of layers if not None, :py:class:`BayesianNetwork` for more details.
+        no_models : int, default : 10
+            Number of Bayesian neural networks to use in ensemble
+        """
         self.models = [BayesianNetwork(in_features, layers, noise_variance, dropout_prob) for _ in range(no_models)]
         self.in_features = in_features
         self.layers = layers
@@ -109,7 +161,22 @@ class BayesianNetworkEnsemble:
     def __call__(self, input: torch.Tensor, return_predictions: bool = False):
         return self.predict(input, return_predictions)
 
-    def predict(self, input: torch.Tensor, return_predictions: bool = False):
+    # TODO: Add cutoff to keep mean and 95% confidence interval between 0 and 1
+    def predict(self, input: torch.Tensor, return_predictions: bool = False)\
+            -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Predicts
+        Parameters
+        ----------
+        input : torch.Tensor
+            Input features
+        return_predictions: bool, optional
+            If True then all individial predictions are returned as well
+        Returns
+        -------
+        tuple
+            Tuple of mean and standard deviation of predictions and all individal predictions if
+        """
         with torch.no_grad():
             preds = torch.empty((self.no_models, len(input), 1))
             for i, m in enumerate(self.models):
@@ -122,10 +189,28 @@ class BayesianNetworkEnsemble:
             else:
                 return pred_mean, pred_std
 
-    def importance(self, train, test, relative: bool = False, return_std: bool = False) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
+    def importance(self, test: torch.Tensor, relative: bool = False, return_std: bool = False) \
+            -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        """
+        Returns average importance of input features
+        Parameters
+        ----------
+        test: torch.Tensor
+            Test input
+        relative: bool, optional
+            If True normalise by L1 norm
+        return_std: bool, optional
+            If True returns standard deviation of each feature importance
+
+        Returns
+        -------
+        torch.Tensor
+            Average importance of each feature
+
+        """
         importances = torch.empty((self.no_models, self.in_features))
         for i in range(self.no_models):
-            importances[i] = self.models[i].importance(train, test, norm=False)
+            importances[i] = self.models[i].importance(test, norm=False)
         avg = importances.mean(dim=0)
         std = importances.std(dim=0)
         if relative:
@@ -138,133 +223,34 @@ class BayesianNetworkEnsemble:
             return avg
 
     def train(self):
+        """Sets all models in the ensemble to training mode"""
         for model in self.models:
             model.train()
 
     def eval(self):
+        """Sets all models in the ensemble to evaluation mode"""
         for model in self.models:
             model.eval()
 
 
-def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False):
-    if len(features) != len(labels):
-        raise ValueError("Features and labels must have same length")
-    size = len(features)
-    log = []
-    no_batches = size // batchsize + 1
-    rand_indices = torch.randperm(size)
-    for i in range(no_batches):
-        batch_start = i * batchsize
-        batch_end = min((i + 1) * batchsize,size)
-        rand_indices = torch.randperm(size)
-        if batch_end != batch_start:
-            X = features[rand_indices[batch_start:batch_end]]
-            y = labels[rand_indices[batch_start:batch_end]]
-            pred = model(X)
-            loss = loss_fn(pred, y)
-            loss += model.regularization() / size
-
-            # Backpropagation
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-
-            if i % 10 == 0:
-                loss, current = loss.item(), i * len(X)
-                if math.isnan(loss):
-                    raise RuntimeError("Loss shouldn't be nan")
-                if verbose:
-                    print(f"\rloss: {loss:>7f} [{current:>5d}/{size:>5d}]", end="")
-                log.append(loss)
-
-    return log
-
 def log_likelihood(pred_mean, pred_std, target):
+    """
+    Calculated log-likelihood of a prediction
+    Parameters
+    ----------
+    pred_mean : torch.Tensor
+        Mean of predictions
+    pred_std : torch.Tensor
+        Standard deviation of predictions
+    target : torch.Tensor
+        True value
+
+    Returns
+    -------
+    float
+        Log-likelihood of prediction
+    """
+
     log_2pi = 1.83787706641
     return torch.mean(0.5 * (torch.square(pred_mean - target) / torch.square(pred_std) + torch.log(
         torch.square(pred_std)) + log_2pi))
-
-
-def ensemble_predict(models, X):
-    with torch.no_grad():
-        preds = torch.stack([m(X) for m in models])
-        mean = preds.mean(dim=0)
-        std = preds.std(dim=0)
-        return mean, std
-
-if __name__== "__main__":
-
-    #    model = BayesianNetwork(6, data_noise=0, layers=[3, 2, 1])
-    import warnings
-    warnings.filterwarnings("error")
-
-
-
-    noise = 0.1
-    x_train = torch.linspace(-1, 1, 10000)
-    x_train = x_train.reshape(-1, 1)
-    y_gt = 0.5 * torch.sin(x_train * 5 * torch.pi + 5 * torch.pi) + 0.5
-    y_train = y_gt + noise * torch.randn_like(y_gt)
-
-    plt.plot(x_train, y_gt, c="r")
-    plt.scatter(x_train, y_train, s=1)
-    plt.show()
-
-    # x_test = (torch.pi * torch.rand(100) + 9.5 * torch.pi) / (5 * torch.pi) - 1
-    x_test = torch.rand(250) * 2.2 - 1
-    x_test = x_test.sort()[0]
-    y_test = 0.5 * torch.sin(x_test * 5 * torch.pi + 5 * torch.pi) + 0.5
-    x_test = x_test.reshape(-1, 1)
-    n_ensemble = 10
-
-    models = [BayesianNetwork(1, layers=[50, 1], data_noise=noise ** 2) for _ in range(10)]
-
-    # Sample prior
-    with torch.no_grad():
-        prior_mean, prior_std = ensemble_predict(models, x_test)
-
-        plt.errorbar(y_test, prior_mean[:, 0], yerr=prior_std[:, 0], fmt="o")
-        plt.plot(y_test, y_test, c="r", ls="-")
-        plt.show()
-        print("Yo")
-
-
-
-    logs = []
-    for i, m in enumerate(models):
-        print(f"*****************************************************Training model #{i + 1} ")
-
-        loss_fn = torch.nn.MSELoss()
-        optimiser = torch.optim.Adam(m.parameters(), lr=0.001)
-
-        epochs = 200
-        log = []
-        for t in range(epochs):
-            print(f"Epoch: #{t + 1:03}")
-            curr_log = train_loop(x_train, y_train, m, loss_fn, optimiser, 32, verbose=True)
-            log = log + curr_log
-            print("")
-
-        print("")
-        logs.append(log)
-
-    for log in logs:
-        plt.plot(log)
-    plt.show()
-
-    post_mean, post_std = ensemble_predict(models, x_test)
-
-    plt.errorbar(y_test, post_mean[:, 0], yerr=post_std[:, 0], fmt="o")
-    plt.plot(y_test, y_test, c="r", ls="-")
-    plt.show()
-    upper, lower = post_mean + 2 * post_std, post_mean - 2 * post_std
-
-    # torch.sort()
-    plt.scatter(x_test[:, 0], y_test, label="Truth", c="C0")
-    plt.plot(x_test[:, 0], post_mean[:, 0], label="Predict mean", c="C1")
-    plt.fill_between(x_test[:, 0], upper[:, 0], lower[:, 0], label="95% confidence", alpha=0.4)
-    plt.legend()
-    plt.show()
-
-
-
