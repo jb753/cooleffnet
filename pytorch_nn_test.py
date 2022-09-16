@@ -279,7 +279,8 @@ def main():
     parser.add_argument("--loss", action="store_true", help="Show loss curves after training")
     parser.add_argument("--plot", action="store_true", help="Plot test set predictions at end")
     parser.add_argument("--prior", action="store_true", help="Show prior distribution")
-    parser.add_argument("--export", action="store_true", help="Train on entire dataset and save")
+    parser.add_argument("--export", action="store_true", help="Train on entire dataset and save network")
+    parser.add_argument("-o", "--output", type=Path, help="Path to export model file")
     parser.add_argument("--holdout", action="store_true",
                         help="Train on a random subset of the dataset and test on the remaining")
     parser.add_argument("--training-min", type=int, help="Min. number of training examples", default=10000)
@@ -489,10 +490,11 @@ def main():
 
         print(f"Training loss root-MSE: {full_train_score}")
 
-        export_path = Path(f"{int(RUN_ID)}.pth")
+        export_path = Path(f"{int(RUN_ID)}.pth") if args.output is None else args.output
 
         export_dict = {
             "flow_params": flow_params,
+            "x_norm": x_norm,
             "norm_mean": sc.mean,
             "norm_stdev": sc.std,
             "constructor": full_ensemble.get_constructor_params(),

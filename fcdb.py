@@ -667,7 +667,7 @@ class Figure:
         Returns a transformed version of x/D
         Parameters
         ----------
-        transformation : {"log", "reciprocal}
+        transformation : {"log", "reciprocal"}
             Type of transformation, see generate_dataset() for more details
         Returns
         -------
