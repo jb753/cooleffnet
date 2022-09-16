@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Dict, List
 
 import torch
 from captum.attr import DeepLift
@@ -76,7 +76,7 @@ class BayesianNetwork(torch.nn.Module):
                     self.__init_biases.append(torch.normal(mean_biases, std))
                 self.stack[linear_idx].bias.data = self.__init_biases[-1]
 
-    def regularization(self):
+    def regularization(self) -> float:
         """Returns the total regularization term, before normalisation by the number of samples"""
         loss_unnorm = 0
         for i in range(len(self.layers)):
@@ -89,7 +89,7 @@ class BayesianNetwork(torch.nn.Module):
 
         return loss_unnorm
 
-    def importance(self, test, norm: bool = True):
+    def importance(self, test, norm: bool = True) -> torch.Tensor:
         """
         Returns the importance of each input feature according the DeepLift feature attribution scheme
         Parameters
@@ -150,15 +150,17 @@ class BayesianNetworkEnsemble:
         self.in_features = in_features
         self.layers = layers
         self.noise_variance = noise_variance
+        self.dropout_prob = dropout_prob
         self.no_models = no_models
 
     def __getitem__(self, item) -> BayesianNetwork:
         return self.models[item]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.models)
 
-    def __call__(self, input: torch.Tensor, return_predictions: bool = False):
+    def __call__(self, input: torch.Tensor, return_predictions: bool = False) \
+            -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.predict(input, return_predictions)
 
     # TODO: Add cutoff to keep mean and 95% confidence interval between 0 and 1
@@ -231,6 +233,49 @@ class BayesianNetworkEnsemble:
         """Sets all models in the ensemble to evaluation mode"""
         for model in self.models:
             model.eval()
+
+    def get_constructor_params(self):
+        """
+        Returns all parameters necessary to construct an empty ensemble with the same setup
+        Returns
+        -------
+        dict
+            Dictionary of all parameters necessary to construct an empty ensemble with the same structure.
+        """
+        constructor_params = {
+            "no_models": len(self.models),
+            "in_features": self.in_features,
+            "layers": self.layers,
+            "noise_variance": self.noise_variance,
+            "dropout_prob": self.dropout_prob,
+        }
+        return constructor_params
+
+    def state_dicts(self) -> List[torch.Tensor]:
+        """
+        Returns a list of all the state dicts in the network
+        Returns
+        -------
+        list
+            Returns a list of all the state dicts in the network
+        """
+        return [m.state_dict() for m in self.models]
+
+    def load_state_dicts(self, state_dicts: Sequence[Dict]):
+        """
+        Loads state dictionaries into models
+        Parameters
+        ----------
+        state_dicts
+            List of state dicts
+        Returns
+        -------
+
+        """
+        if len(self.models) != len(state_dicts):
+            raise ValueError("Number of models in state dict and number of models in network")
+        for m, state_dict in zip(self.models, state_dicts):
+            m.load_state_dict(state_dict)
 
 
 def log_likelihood(pred_mean, pred_std, target):

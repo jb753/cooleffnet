@@ -40,6 +40,7 @@ class CoolingDatabase:
             Boolean flag controlling verbosity (default False)
         """
         self.__datafiles = [f for f in database_dir.iterdir() if f.is_file() and f.suffix == ".json"]
+        self.__figures = [Figure(f) for f in self.__datafiles]
         self.__verbose = verbose
         self.__dataset_generated = False
 
@@ -94,15 +95,14 @@ class CoolingDatabase:
         self.__test_labels = []
         self.__test_files = []
 
-        file_list = self.__datafiles.copy()
+        figure_list = self.__figures.copy()
         if shuffle:
-            random.shuffle(file_list)
+            random.shuffle(figure_list)
 
         unique_vals = set()
         train_count = 0
         test_count = 0
-        for file in file_list:
-            fig = Figure(file)
+        for fig in figure_list:
             feats, labels = fig.get_feature_label_maps(flow_param_list, include_correlations, data_filter, x_norm)
             no_data_points = sum(len(x) for x in feats)
 
@@ -127,11 +127,11 @@ class CoolingDatabase:
                     self.__training_feats += feats
                     self.__training_labels += labels
                     train_count += no_data_points
-                    self.__training_files.append(file)
+                    self.__training_files.append(fig.get_file())
                 elif test_count < test_min:
                     self.__test_feats += feats
                     self.__test_labels += labels
-                    self.__test_files.append(file)
+                    self.__test_files.append(fig.get_file())
                     test_count += no_data_points
 
         self.__training_total = train_count
@@ -313,7 +313,7 @@ class CoolingDatabase:
 
         return feat_matrix, label_matrix
 
-    def get_files(self, test: bool = False) -> List[Path]:
+    def get_holdout_files(self, test: bool = False) -> List[Path]:
         """
         Parameters
         ----------
@@ -326,7 +326,22 @@ class CoolingDatabase:
         """
         if not self.__dataset_generated:
             raise RuntimeError("Requested training dataset without calling generate_dataset() before")
-        return self.__test_files if test else self.__training_files
+        else:
+            return self.__test_files if test else self.__training_files
+
+    def get_all_files(self) -> List[Path]:
+        """
+        Returns list of all files in database.
+        Returns
+        -------
+        list
+            List of Paths pointing to all files in the database
+        """
+        return self.__datafiles
+
+    def get_example_count(self) -> int:
+        """Returns number of examples in database"""
+        return sum(fig.get_example_count() for fig in self.__figures)
 
 
 class Figure:
@@ -422,6 +437,7 @@ class Figure:
             A Path object pointing to the JSON measurement data
         """
 
+        self.__file = file
         with open(file) as figure_file:
             self.__figure_dict = json.load(figure_file)
 
@@ -768,6 +784,14 @@ class Figure:
             The typical measurement uncertainty in film effectiveness
         """
         return self.__uncertainty_eff_abs
+
+    def get_example_count(self) -> int:
+        """Returns number of examples in Figure"""
+        return sum(len(x) for x in self.__parameters['eff'])
+
+    def get_file(self) -> Path:
+        """Returns Path to the corresponding JSON file"""
+        return self.__file
 
     def __str__(self):
         return f"Study: {self.__ref}, {self.__fig}, varies parameters: {self.__variations_in}"

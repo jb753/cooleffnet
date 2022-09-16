@@ -16,8 +16,8 @@ if __name__ == "__main__":
     db.generate_dataset(11000, 2000, flow_param_list=flow_params)
     training_feats, training_labels = db.get_dataset()
     test_feats, test_labels = db.get_dataset(test=True)
-    training_files = db.get_files()
-    test_files = db.get_files(test=True)
+    training_files = db.get_holdout_files()
+    test_files = db.get_holdout_files(test=True)
 
     # split_feats, split_labels = db.split_training(5)
     (cv_training_feats, cv_training_labels), (cv_test_feats, cv_test_labels) = db.get_crossvalidation_sets(5)
