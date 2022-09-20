@@ -45,3 +45,4 @@ figures/output/
 *.vrb
 *.bak~
 slides/commit.tex
+/plots/

@@ -1,6 +1,51 @@
 """General utility functions."""
 
 import numpy as np
+import torch
+
+class CustomStandardScaler():
+
+    def __init__(self):
+        self.mean = 0
+        self.std = 0
+    def fit(self, x: torch.Tensor, dim=None):
+        self.mean = x.mean(dim=dim, keepdim=True)
+        self.std = x.std(dim=dim, unbiased=False, keepdim=True)
+
+    def transform(self, x: torch.Tensor):
+        x -= self.mean
+        x /= (self.std + 1e-10)
+        return x
+
+    def fit_transform(self, x: torch.Tensor, dim = None):
+        self.fit(x, dim)
+        return self.transform(x)
+
+    def inverse(self, x_scaled: torch.Tensor):
+        return x_scaled * (self.std + 1e-10) + self.mean
+
+
+class CustomMinMaxScaler():
+
+    def __init__(self):
+        self.min = None
+        self.max = None
+        self.range = None
+
+    def fit(self, x: torch.Tensor, dim=None):
+        self.min = x.min(dim=dim, keepdim=True)[0]
+        self.max = x.max(dim=dim, keepdim=True)[0]
+        self.range = self.max - self.min
+
+    def transform(self, x: torch.Tensor):
+        return (x - self.min) / self.range
+
+    def fit_transform(self, x: torch.Tensor, dim=None):
+        self.fit(x, dim=dim)
+        return self.transform(x)
+
+    def inverse(self, x_scaled: torch.Tensor):
+        return x_scaled * self.range + self.min
 
 
 def get_geometry(phi, psi, Lphi_D, Lpsi_D, alpha):
