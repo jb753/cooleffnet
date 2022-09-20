@@ -296,7 +296,7 @@ def main():
     parser.add_argument("--cv", type=int, nargs='?', const=5,
                         help="Number of cross-validation sets")  # cv is None if not specified, 5 if cv given but no arg
     parser.add_argument("--comment", type=str, help="Comment to save in the run log", default="")
-    parser.add_argument("--filter", type=str, help="Data filter [cylindrical/shaped]", default=None)
+    parser.add_argument("--filter", type=str, help="Data filter", choices=["cylindrical", "shaped"], default=None)
     parser.add_argument("--params", type=str, help="Comma separated list of flow parameters",
                         default="AR,W/D,P/D,IR,BR,ER")
 
