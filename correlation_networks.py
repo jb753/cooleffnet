@@ -1,12 +1,11 @@
 from pathlib import Path
 
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 
-from util import CustomStandardScaler
-from pytorch_nn_test import cross_validation
-import fcdb
+from cooleffnet.util import CustomStandardScaler
+from cooleffnet.cooleffnet_train import cross_validation
+import cooleffnet.fcdb as fcdb
 
 if __name__ == "__main__":
     db = fcdb.CoolingDatabase(Path("data"))

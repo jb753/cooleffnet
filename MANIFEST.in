@@ -1,0 +1,2 @@
+include cooleffnet/models/*.pth
+include cooleffnet/models/*.dat

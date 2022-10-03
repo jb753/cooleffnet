@@ -6,16 +6,11 @@ Colban et al. (2011) - cylindrical holes.
 """
 
 import numpy as np
-import os.path
-
-
-# Define filename for the Baldauf b0 fit
-Baldauf_b0_fit_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "Baldauf_b0_coeffs.dat")
-)
+import io
+import pkgutil
 
 # Load the fit data
-Baldauf_b0_coeffs = np.loadtxt(Baldauf_b0_fit_path)
+Baldauf_b0_coeffs = np.loadtxt(io.StringIO(pkgutil.get_data(__name__, "models/Baldauf_b0_coeffs.dat").decode("utf-8")))
 """Fitted polynomial surface to optimum b0 for Baldauf et al. (2002) data.
 
 There is a typo in Eqn. (31) from their paper, so that the value of b0 does

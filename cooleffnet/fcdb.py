@@ -8,9 +8,8 @@ from typing import Sequence, Tuple, List
 import numpy as np
 import CoolProp.CoolProp as CoolProp
 
-import util
-import correlations
-
+from cooleffnet.util import get_geometry, trailing_edge_offset
+from cooleffnet.correlations import baldauf, colban
 
 def to_array(parameter, length):
     """Utility function to convert every parameter to arrays of the right length"""
@@ -502,7 +501,7 @@ class Figure:
 
             # Fix coordinate system origin at center of hole
             if self.__is_x_origin_trailing_edge:
-                offset = util.trailing_edge_offset(self.__alpha, self.__psi, self.__Lpsi_D)
+                offset = trailing_edge_offset(self.__alpha, self.__psi, self.__Lpsi_D)
                 if type(offset) is np.ndarray:
                     self.__x_D = [curr_x + curr_offset for curr_x, curr_offset in zip(self.__x_D, offset)]
                 else:
@@ -566,7 +565,8 @@ class Figure:
         """Initialises self.__parameters with all parameters that can be possibly relevant"""
 
         max_length = len(self.__x_D) if type(self.__x_D) is list else 1
-        AR, edge_offset, W_D = util.get_geometry(self.__phi, self.__psi, self.__Lphi_D, self.__Lpsi_D, self.__alpha)
+        AR, edge_offset, W_D = get_geometry(self.__phi, self.__psi,
+                                            self.__Lphi_D, self.__Lpsi_D, self.__alpha)
         self.__parameters['AR'] = to_array(AR, max_length)
         self.__parameters['edge_offset'] = to_array(edge_offset, max_length)
         self.__parameters['W_D'] = to_array(W_D, max_length)
@@ -635,10 +635,10 @@ class Figure:
             raise ValueError("For a single correlation, all inputs should be single values")
         if math.isclose(AR, 1.0):
             # Cylindrical hole, use Baldauf's correlation
-            return correlations.baldauf(x_D, alpha, P_D, BR, DR, Tu / 100.0, b_0="fit")
+            return baldauf(x_D, alpha, P_D, BR, DR, Tu / 100.0, b_0="fit")
         else:
             # Shaped hole, use Colban's correlation
-            return correlations.colban(x_D - edge_offset, P_D, W_P, BR, AR)
+            return colban(x_D - edge_offset, P_D, W_P, BR, AR)
 
     def get_correlations(self):
         """

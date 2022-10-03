@@ -11,7 +11,7 @@ doc/source/auto_examples/
 *.egg-info
 build
 dist
-models/*
+cooleffnet/models/*
 figures/output/
 *.aux
 *.lof

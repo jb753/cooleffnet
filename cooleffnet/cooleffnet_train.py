@@ -8,11 +8,10 @@ from typing import List, Sequence, Tuple, Dict
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import Dataset
 
-from fcdb import CoolingDatabase, Figure
-from util import CustomStandardScaler
-from bayesian_ensemble_network import BayesianNetworkEnsemble
+from cooleffnet.fcdb import CoolingDatabase, Figure
+from cooleffnet.util import CustomStandardScaler
+from cooleffnet.bayesian_ensemble_network import BayesianNetworkEnsemble
 
 RUN_ID = time.time()
 
@@ -24,26 +23,6 @@ def remove_minmax(array):
 
 def find_nearest_idx(array, val):
     return torch.abs(array - val).argmin()
-
-
-class CoolingDataset(Dataset):
-    def __init__(self, feats, labels, transform=None, target_transform=None):
-        self.feats = feats
-        self.labels = labels
-        self.transform = transform
-        self.target_transform = target_transform
-
-    def __len__(self):
-        return len(self.feats)
-
-    def __getitem__(self, idx):
-        feat = self.feats[idx]
-        label = self.labels[idx]
-        if self.transform is not None:
-            feat = self.transform(feat)
-        if self.target_transform is not None:
-            label = self.target_transform(label)
-        return feat, label
 
 
 def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False, device="cpu"):
@@ -77,37 +56,12 @@ def train_loop(features, labels, model, loss_fn, opt, batchsize, verbose=False, 
     return log
 
 
-class NeuralNetwork(torch.nn.Module):
-    def __init__(self, in_feats, no_nodes):
-        super(NeuralNetwork, self).__init__()
-        self.stack = torch.nn.Sequential(
-            torch.nn.Linear(in_feats, no_nodes),
-            torch.nn.ReLU(),
-            # torch.nn.Dropout(0.2),
-            # torch.nn.Linear(no_nodes,  no_nodes),
-            # torch.nn.ReLU(),
-            # torch.nn.Dropout(0.2),
-            # torch.nn.Linear(no_nodes,  no_nodes),
-            # torch.nn.ReLU(),
-            # torch.nn.Dropout(0.2),
-            # torch.nn.Linear(no_nodes,  no_nodes),
-            # torch.nn.ReLU(),
-            # torch.nn.Dropout(0.2),
-            # torch.nn.Tanh(),
-            torch.nn.Linear(no_nodes, 1),
-            # torch.nn.ReLU()
-            # torch.nn.Linear(in_feats, 1),
-            # torch.nn.ReLU()
-        )
-
-    def forward(self, x):
-        return self.stack(x)
-
-
 def train_ensemble(ensemble, epochs, training, test: tuple = None, verbose: bool = False, show_loss: bool = False,
                    device: str = "cpu", optargs: dict = None):
     training_feats, training_labels = training
-    test_feats, test_labels = test if test is not None else None, None
+    test_feats, test_labels = None, None
+    if test is not None:
+        test_feats, test_labels = test
 
     default_optargs = {
         'lr': 0.001,
@@ -186,6 +140,8 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
                      cv_test: Tuple[torch.Tensor, torch.Tensor],
                      epochs: int,
                      layers: Sequence[int],
+                     noise: float = 0.018,
+                     no_models: int = 10,
                      optargs: dict = None,
                      stats: bool = True,
                      verbose: bool = False,
@@ -204,7 +160,8 @@ def cross_validation(cv_training: Tuple[torch.Tensor, torch.Tensor],
 
         if verbose:
             print(f"----- {nodes:03}/{cv_idx + 1:02} nodes -----")
-        ensemble = BayesianNetworkEnsemble(cv_training_feats.shape[-1], layers=layers, noise_variance=0.018 ** 2)
+        ensemble = BayesianNetworkEnsemble(cv_training_feats.shape[-1], layers=layers,
+                                           noise_variance=noise ** 2, no_models=no_models)
         train_score, test_score = train_ensemble(ensemble, epochs,
                                                  (cv_training_feats[cv_idx], cv_training_labels[cv_idx]),
                                                  (cv_test_feats[cv_idx], cv_test_labels[cv_idx]), verbose=verbose,
@@ -274,8 +231,6 @@ def plot_true_predicted(true, predicted,
 def main():
     parser = argparse.ArgumentParser(description="Train neural network on turbine film cooling database")
     parser.add_argument("-d", "--directory", type=str, required=False, help="Database directory", default="data")
-    parser.add_argument("--super", action="store_true", help="To run on a supercomputer")
-    parser.add_argument("--cpu", action="store_true", help="Force running on CPU")
     parser.add_argument("--loss", action="store_true", help="Show loss curves after training")
     parser.add_argument("--plot", action="store_true", help="Plot test set predictions at end")
     parser.add_argument("--prior", action="store_true", help="Show prior distribution")
@@ -285,8 +240,10 @@ def main():
                         help="Train on a random subset of the dataset and test on the remaining")
     parser.add_argument("--training-min", type=int, help="Min. number of training examples", default=10000)
     parser.add_argument("--test-min", type=int, help="Min. number of test examples", default=2000)
-    parser.add_argument("-e", "--epochs", type=int, help="Number of training epochs to run", default=70)
+    parser.add_argument("-e", "--epochs", type=int, help="Number of training epochs to run", default=100)
     parser.add_argument("-n", "--nodes", type=int, help="Number of nodes in each hidden layer", default=100)
+    parser.add_argument("--no-models", type=int, help="Number of models in ensemble", default=10)
+    parser.add_argument("--noise", type=float, help="Magnitude of noise in data", default=0.018)
     parser.add_argument("--hidden", type=int, help="Number of hidden layers", default=1)
     parser.add_argument("--xnorm", type=str, help="Transform x/D some way", choices=["log", "reciprocal"])
     parser.add_argument("--conv-limit", type=float,
@@ -301,11 +258,8 @@ def main():
                         default="AR,W/D,P/D,IR,BR,ER")
 
     args = parser.parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    if args.cpu:
-        print("Forcing to run on CPU")
-        device = "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
     print(f"Using {device} device")
 
@@ -316,6 +270,8 @@ def main():
     nodes = args.nodes
     no_hidden = args.hidden
     layers = [nodes] * no_hidden + [1]
+    no_models = args.no_models
+    noise = args.noise
     cv_count = args.cv
     training_min = args.training_min
     test_min = args.test_min
@@ -344,6 +300,8 @@ def main():
         'no_hidden': no_hidden,
         'epochs': epochs,
         'layers': layers,
+        'no_models': no_models,
+        'noise': noise,
         'comment': args.comment,
     }
 
@@ -372,7 +330,7 @@ def main():
 
         cv_ensembles, cv_results = cross_validation((cv_training_feats, cv_training_labels),
                                                     (cv_test_feats, cv_test_labels),
-                                                    epochs, layers,
+                                                    epochs, layers, no_models=no_models, noise=noise,
                                                     stats=True, verbose=True, show_loss=args.loss, optargs=optargs)
         print(f"\r{nodes:03}/{len(cv_training_feats):02} nodes, "
               f"avg. training score: {cv_results['masked_training_average']:.3g} "
@@ -399,7 +357,7 @@ def main():
         test_feats = sc.transform(torch.from_numpy(test_feats).float().to(device))
         test_labels = torch.from_numpy(test_labels).float().to(device)
 
-        ensemble = BayesianNetworkEnsemble(len(training_feats[0]), layers, 0.018 ** 2)
+        ensemble = BayesianNetworkEnsemble(len(training_feats[0]), layers, noise ** 2, no_models=no_models)
 
         if args.prior:
             with torch.no_grad():
@@ -458,11 +416,7 @@ def main():
                              f"Is same study in training set? {'Yes' if is_study_in_training else 'No'}\n"
                              f"Average MSE: {sum(scores) / len(scores):.3g}")
 
-                plot_ctr = 1
                 plot_path = Path.cwd() / "plots" / (file.stem + f"_{RUN_ID}" + ".png")
-                while plot_path.exists():
-                    plot_ctr += 1
-                    plot_path = Path.cwd() / "plots" / (file.stem + f"_{RUN_ID}" + ".png")
 
                 fig.savefig(plot_path)
                 plt.show()
@@ -484,7 +438,7 @@ def main():
         full_training_feats = sc.fit_transform(torch.from_numpy(full_training_feats).float().to(device), dim=0)
         full_training_labels = torch.from_numpy(full_training_labels).float().to(device)
 
-        full_ensemble = BayesianNetworkEnsemble(len(full_training_feats[0]), layers, 0.018 ** 2)
+        full_ensemble = BayesianNetworkEnsemble(len(full_training_feats[0]), layers, noise ** 2, no_models=no_models)
         full_train_score = train_ensemble(full_ensemble, epochs, (full_training_feats, full_training_labels),
                                           verbose=True, show_loss=args.loss, optargs=optargs)
 
@@ -502,7 +456,6 @@ def main():
         }
         torch.save(export_dict, export_path)
 
-    print(log_dict)
     log_path = Path.cwd() / "logs" / f"run_{RUN_ID}.json"
     with open(log_path, "w") as log_file:
         json.dump(log_dict, log_file, indent=2)

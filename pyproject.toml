@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cooleffnet"
+version = "0.1.0"
+authors = [
+    { name = "András Ottó Földes", email = "aof26@cam.ac.uk"},
+    { name = "Dr James Brind", email = "jb753@eng.cam.ac.uk"},
+]
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.6"
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy~=1.23.1",
+    "CoolProp~=6.4.1",
+    "torch~=1.12.0",
+    "matplotlib~=3.5.2",
+    "captum~=0.5.0",
+    "prettytable~=3.3.0",
+]
+[project.urls]
+"Homepage" = "https://github.com/j"
+
+[project.scripts]
+cooleffnet = "cooleffnet.cooleffnet_pred:main"
+cooleffnet-train = "cooleffnet.cooleffnet_train:main"
+
+[tool.setuptools.packages.find]
+include = ["cooleffnet"]

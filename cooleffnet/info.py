@@ -2,10 +2,10 @@ import math
 from pathlib import Path
 import numpy as np
 
-from fcdb import Figure
+from cooleffnet.fcdb import Figure
 
 if __name__ == "__main__":
-    data_files = [path for path in Path("data").iterdir() if path.is_file() and path.suffix == ".json"]
+    data_files = [path for path in Path("../new_data").iterdir() if path.is_file() and path.suffix == ".json"]
 
     # TODO: Add proper testing
     data_set_no = 0
