@@ -230,7 +230,7 @@ def plot_true_predicted(true, predicted,
 
 def main():
     parser = argparse.ArgumentParser(description="Train neural network on turbine film cooling database")
-    parser.add_argument("-d", "--directory", type=str, required=False, help="Database directory", default="data")
+    parser.add_argument("-d", "--directory", type=str, help="Database directory", default=".")
     parser.add_argument("--loss", action="store_true", help="Show loss curves after training")
     parser.add_argument("--plot", action="store_true", help="Plot test set predictions at end")
     parser.add_argument("--prior", action="store_true", help="Show prior distribution")
