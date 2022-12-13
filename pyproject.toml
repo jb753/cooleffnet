@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cooleffnet"
-version = "0.1.2"
+version = "0.1.0"
 description = "CoolEffNet - Predicting Film Cooling Effectiveness with Neural Networks"
 authors = [
     "András Ottó Földes <aof26@cam.ac.uk>",
