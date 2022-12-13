@@ -259,42 +259,181 @@ tensor([[0.0000],
 Many of the options available from the command-line are also available in code.
 Please refer to the docstrings in `cooleffnet/predictor.py` for more details.
 
+#### CoolEffNet-Train
+
+CoolEffNet-Train is the tool which was used to train the neural networks included
+in CoolEffNet. It can be used to train networks on your own datasets, potentially
+improving the performane of the network ensemble even further. 
+Please note that CoolEffNet-Train is a development tool, and while it is released to
+the public in this repository, it is not as user-friendly as CoolEffNet and it is structured
+in a way that was convenient for the developers and it may contain less helpful error messages and warnings.
+Pull requests improving this are very welcome.
+Nevertheless, the code has detailed docstrings in `cooleffnet/cooleffnet_train.py` and
+some basic examples are provided here to get you started. 
+
+First, you need a database of measurements. The one used to generate the `general` and `specific`
+models included use the one in the `data/` folder. 
+Each JSON file in the directory correspond to a single figure of an academic paper. 
+It may contain several $x/D$ - film effectiveness curves, though one limitation is that
+one file may contain only one combination of fluids. For more details on how the
+data files are structured please see the existing examples in the folder and the [Databases document.](DATABASES.md)
+
+CoolEffNet-Train can be launched with `cooleffnet-train`. You likely need to specify
+the directory where your measurement JSON files are located using the `-d DIRECTORY` option.
+The default directory is the current working directory.
+Then CoolEffNet-Train can do three kinds of training, each with their flag. If multiple are specified
+they are run one after another
+* `--export` - Trains the ensemble using the entire dataset and saves the network to a file
+* `--cv [K]` - `K`-fold cross validation on the entire dataset. Default `K` is 5. 
+* `--holdout` - Trains on a random subset of the dataset and tests on the holdout group.
+
+Then the parameters to be used in the input layer need to be given using the 
+`--params PARAMS` argument. Refer to the [full list of possible parameters.](#possible-parameters)
+A log file about the training is saved about each training run for future reference.
+There are various options to configure the training process, though the defaults are reasonable.
+For details refer to [Options](#cooleffnet-train-1)
+##### Creating a model to use in `cooleffnet`
+
+Assume all measurements are in the `data/` folder. 
+```bash
+$ cooleffnet-train -d=data --export -o=yourmodel.pth
+Using cpu device
+Using variables ['AR', 'W/D', 'P/D', 'IR', 'BR', 'ER']
+Running for 100 epochs, with network layers: [100, 1]
+
+Training on all data in dataset to export & save model
+Training model #1
+Training model #2
+Training model #3
+Training model #4
+Training model #5
+Training model #6
+Training model #7
+Training model #8
+Training model #9
+Training model #10
+Training loss root-MSE: 0.03205139935016632
+```
+This saves the trained network to the file `yourmodel.pth`. 
+
+##### Custom network parameters 
+
+You can fine-tune the parameters of the networks in the ensemble.
+E.g. the following uses an ensemble of 7 networks, each having 2 hidden layers with 50 nodes each.
+```bash
+$ cooleffnet-train -d=data --export -o=yourmodel.pth --no-models 7 --nodes 50 --hidden=2
+Using cpu device
+Using variables ['AR', 'W/D', 'P/D', 'IR', 'BR', 'ER']
+Running for 100 epochs, with network layers: [50, 50, 1]
+
+Training on all data in dataset to export & save model
+Training model #1
+Training model #2
+Training model #3
+Training model #4
+Training model #5
+Training model #6
+Training model #7
+Training loss root-MSE: 0.028433576226234436
+```
+
+##### Custom learning parameters
+You can configure the learning rate, the batch size, the number of epochs 
+and the input parameters as well using the relevant options.
+
+```bash
+$ cooleffnet-train -d=ddata --export -o=yourmodel.pth -e 100 --lr 0.0001 --batch-size 150 --params=AR,DR,IR,W_D,P_D,alpha
+Using cpu device
+Using variables ['AR', 'DR', 'IR', 'W_D', 'P_D', 'alpha']
+Running for 100 epochs, with network layers: [100, 1]
+
+Training on all data in dataset to export & save model
+Training model #1
+```
+This uses a learning rate of 0.0001 over 100 epochs with a batch size of 150.
+The parameters used are the area ratio, the density ratio, the momentum flux ratio
+, width to diameter ratio, pitch to diameter ratio and the inclination angle. 
+
+##### Cross-validation 
+
+```bash
+$ cooleffnet-train -d data --cv 5
+Using cpu device
+Using variables ['AR', 'W/D', 'P/D', 'IR', 'BR', 'ER']
+Running for 100 epochs, with network layers: [100, 1]
+
+Running 5-fold cross-validation
+----- 100/01 nodes -----
+Training model #1
+Training model #2
+Training model #3
+Training model #4
+Training model #5
+Training model #6
+Training model #7
+Training model #8
+Training model #9
+Training model #10
+----- 100/02 nodes -----
+Training model #1
+Training model #2
+
+...
+
+100/05 nodes, avg. training score: 0.0331 σ = 0.00116, avg. test score: 0.059 σ = 0.0172
+All training scores: [0.033409234136343, 0.03181647136807442, 0.03456484526395798, 0.03408440202474594, 0.03122926503419876]
+All test scores: [0.08272775262594223, 0.07875929027795792, 0.04251845180988312, 0.0479888916015625, 0.05018442124128342]
+Average feature importances: {'Area ratio': -0.15961632132530212, 'Coverage ratio': 0.0870686024427414, 'Pitch to diameter ratio': 0.1649085134267807, 'Momentum flux ratio': 0.25092458724975586, 'Blowing ratio': 0.037732649594545364, 'Advective capacity ratio': -0.0896567851305008, 'Horizontal distance': 0.17432598769664764}
+Std. deviation of feature importances: {'Area ratio': 0.08737105131149292, 'Coverage ratio': 0.021830983459949493, 'Pitch to diameter ratio': 0.05903942137956619, 'Momentum flux ratio': 0.009792736731469631, 'Blowing ratio': 0.07529408484697342, 'Advective capacity ratio': 0.047356124967336655, 'Horizontal distance': 0.06551730632781982}
+```
+This does 5-fold cross validation on the dataset given. 
+
+##### Further options
+
+There are a few other options available, for plotting the loss curves or
+the actual results when using a test set via the `--holdout` option, filtering
+holes based on whether they are cylindrical or shaped, transforming the $x/D$ coordinates
+and more. Refer to the [full list of options](#cooleffnet-train-1) for more details. 
+
 ### Possible parameters
 
-| Parameter short name | Expression | Description                                                  |
-|----------------------|----------------|--------------------------------------------------------------|
-| `AR`                 | $AR$ | Exit-to-inlet cross-sectional area ratio for coolant         |
-| `W_D`                | $\frac{W}{D}$ | Hole width to diameter ratio (coverage ratio                 |
-| `W_P`                | $\frac{W}{P}$ | Hole width to hole pitch ratio                               |
-| `P_D`                | $\frac{P}{D}$ | Hole pitch to diameter ratio                                 |
-| `L_D`                | $\frac{L}{D}$ | Coolant hole centerline length to hole diameter ratio        |
-| `Alpha`              | $\alpha$ | Inclination angle of coolant hole, see diagram below         |
-| `Beta`               | $\beta$ | Orientation/compound angle of coolant hole, see diagram below |
-| `Re`                 | $Re$ | Coolant Reynold number                                       |
-| `Ma`                 | $Ma$ | Coolant Mach number                                          |
-| `Tu`                 | $Tu$ | Mainstream  turbulence intensity                             |
-| `VR`                 | $VR$ | Coolant to mainstream velocity ratio                         |
-| `BR`                 | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty}$ | Blowing ratio                                                |
-| `BR_normal`          | $BR \sin(\alpha)$ | Normal component of the blowing ratio"                       |
-| `BR_perpendicular`   | $BR \sin(\beta)$ | Perpendicular component of blowing ratio"                    |
-| `DR`                 | $\frac{\rho_c}{\rho_\infty}$ | Coolant-to-mainstream density ratio"                         |
-| `IR`                 | $\frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ | Coolant-to-mainstream momentum flux ratio"                   |
-| `IR_eff`             | $IR / AR^2$ | Effective coolant-to-mainstream momentum flux ratio"         |
-| `IR_normal`          | $IR \sin(\alpha)$ | Normal component of the momentum flux ratio"                 |
-| `IR_perpendicular`   | $IR \sin(\beta)$ | Perpendicular component of the momentum flux ratio"          |
-| `ER`                 | $BR \frac{c_{p,c}}{c_{p,\infty}} $  Coolant-to-mainstream advective capacity ratio"        |
-| `TR`                 | $ \frac{T_c}{T_\infty} $ | Coolant-to-mainstream temperature ratio"                     |
-| `Single_hole`        | - | 1 if single hole, -1 if multiple holes                       |
+| Parameter short name | Expression                                         | Description                                                   |
+|----------------------|----------------------------------------------------|---------------------------------------------------------------|
+| `AR`                 | $AR$                                               | Exit-to-inlet cross-sectional area ratio for coolant          |
+| `W_D`                | $\frac{W}{D}$                                      | Hole width to diameter ratio (coverage ratio                  |
+| `W_P`                | $\frac{W}{P}$                                      | Hole width to hole pitch ratio                                |
+| `P_D`                | $\frac{P}{D}$                                      | Hole pitch to diameter ratio                                  |
+| `L_D`                | $\frac{L}{D}$                                      | Coolant hole centerline length to hole diameter ratio         |
+| `Alpha`              | $\alpha$                                           | Inclination angle of coolant hole, see diagram below          |
+| `Beta`               | $\beta$                                            | Orientation/compound angle of coolant hole, see diagram below |
+| `Re`                 | $Re$                                               | Coolant Reynold number                                        |
+| `Ma`                 | $Ma$                                               | Coolant Mach number                                           |
+| `Tu`                 | $Tu$                                               | Mainstream  turbulence intensity                              |
+| `VR`                 | $VR$                                               | Coolant to mainstream velocity ratio                          |
+| `BR`                 | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty}$     | Blowing ratio                                                 |
+| `BR_normal`          | $BR \sin(\alpha)$                                  | Normal component of the blowing ratio"                        |
+| `BR_perpendicular`   | $BR \sin(\beta)$                                   | Perpendicular component of blowing ratio"                     |
+| `DR`                 | $DR = \frac{\rho_c}{\rho_\infty}$                  | Coolant-to-mainstream density ratio"                          |
+| `IR`                 | $IR = \frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ | Coolant-to-mainstream momentum flux ratio"                    |
+| `IR_eff`             | $IR/AR^2$                                          | Effective coolant-to-mainstream momentum flux ratio"          |
+| `IR_normal`          | $IR \sin(\alpha)$                                  | Normal component of the momentum flux ratio"                  |
+| `IR_perpendicular`   | $IR \sin(\beta)$                                   | Perpendicular component of the momentum flux ratio"           |
+| `ER`                 | $BR \frac{c_{p,\infty}}{c_{p,\infty}}$             | Coolant-to-mainstream advective capacity ratio"               |
+| `TR`                 | $\frac{T_c}{T_\infty}$                             | Coolant-to-mainstream temperature ratio"                      |
+| `Single_hole`        | -                                                  | 1 if single hole, -1 if multiple holes                        |
+
+Reference for geometric parameters:
+![geometry definitions](geom.svg)
 
 ### Options
 
-`cooleffnet`
+#### `cooleffnet`
 
 Usage: 
 ```bash
 cooleffnet [required named arguments] [options] [model name/file]
 ```
-#### Required named arguments:
+##### Required named arguments:
 
 | Required arguments       | Description                                                                                                                   |
 |--------------------------|-------------------------------------------------------------------------------------------------------------------------------|
@@ -302,7 +441,7 @@ cooleffnet [required named arguments] [options] [model name/file]
 | `--x-lin=START,STOP,NUM` | Either this or `--x-vals` needs to be specified. Inputs `NUM` amount of $x/D$ values between `START` and `STOP` to the model. |
 | `--params=PARAMS`        | Comma separated values of flow parameters as required by the model                                                            |
 
-#### Options:
+##### Options:
 | Option | Description                                                                                                                                                                                                         |
 | ------ |---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `-h`, `--help` | Shows help                                                                                                                                                                                                          |
@@ -314,10 +453,38 @@ cooleffnet [required named arguments] [options] [model name/file]
 | ``-no-ci`` | Removes the 95% confidence interval from the output                                                                                                                                                                 |
 | `--no-clip` | The 95% confidence interval, when confidence is low, may occasionally be outside the range of [0.0, 1.0]. As these values are not physical they are clipped to this range by default. Use this option to avoid that |
 
-#### Model
+##### Model
 Optionally specify the model. The default one is called `general` and has predicted 
 film effectiveness well in cross-validation tests.
 The slightly better `specific` model is also available, but it may not generalise well to
 inputs outside the training range.
 Alternatively user-generated models from `cooleffnet-train` may be used well by specifying the path.
 See the [examples](#examples). 
+
+#### `cooleffnet-train`
+
+| Option                          | Description                                                                                                                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-h`, `--help`                  | Shows the help                                                                                                                                                                    |
+| `-d DIR`, `--directory DIR`     | Directory containing the measurement JSON files                                                                                                                                   |
+| `--loss`                        | Shows the loss curves for each model in the ensemble after training                                                                                                               |
+| `--plot`                        | Plots the predicted values of the ensemble for the test set (only for `--holdout`                                                                                                 |
+| `--prior`                       | Shows a true vs. predicted plot for the test set before training (only for `--holdout`                                                                                            |
+| `--export`                      | Trains ensemble using the entire dataset and saves it to a file                                                                                                                   |
+| `-o OUTPUT`, `--output OUTPUT`  | Sets the output file path (only for `--export`)                                                                                                                                   |
+| `--holdout`                     | Trains ensemble using a subset of the dataset then tests it on the holdout group                                                                                                  |
+| `--training-min NUM`            | Minimum number of datapoints in training set (only in `--holdout`)                                                                                                                |
+| `--test-min NUM`                | Minimum number of datapoints in test set (only in `--holdout`)                                                                                                                    |
+| `-e EPOCHS`, `--epochs EPOCHS`  | Number of epochs to use when training a network in the ensemble                                                                                                                   |
+| `-n NODES`, `--nodes NODES`     | Number of nodes in each hidden layers                                                                                                                                             |
+| `--no-models NO_MODELS`         | Number of models in ensemble                                                                                                                                                      |
+| `--noise`                       | Magnitude of noise in the dataset                                                                                                                                                 | 
+| `--hidden NO_HIDDEN`            | Number of hidden layers                                                                                                                                                           | 
+| `--xnorm {log,reciprocal}`      | Optional transformation of $x/D$ values. If `log` used then $\ln(x/D)$ is used as input instead of $x/D$. If `reciprocal` is selected, then $ER/(\frac{P}{D} \cdot x/D)$ is used. |
+| `--conv-limit LIMIT`            | Maximum mean squared loss a network can have to be considered as converged                                                                                                        |
+| `--batch-size SIZE`             | Batch size to use when training a network in the ensemble                                                                                                                         |
+| `--lr LR`                       | Learning rate to use when training a network in the ensemble                                                                                                                      |
+| `--cv [CV]`                     | Do `CV`-fold cross-validation on the dataset. If `CV` is not specified then 5-fold cross-validation is done.                                                                      |
+| `--comment`                     | Comment about the training run. Displayed in the plots and in the logfile.                                                                                                        |
+| `--filter {cylindrical,shaped}` | Optional filter for the dataset. If `cylindrical` is set then only cylindrical holes are used. Similarly, if `shaped` is set then only shaped holes are included.                 |
+| `--params PARAMS`               | Comma separated values of the parameters to use as input parameters. See the [full parameter list](#possible-parameters) for options.                                             |
