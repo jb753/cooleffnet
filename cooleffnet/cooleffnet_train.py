@@ -457,6 +457,7 @@ def main():
         torch.save(export_dict, export_path)
 
     log_path = Path.cwd() / "logs" / f"run_{RUN_ID}.json"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "w") as log_file:
         json.dump(log_dict, log_file, indent=2)
 
