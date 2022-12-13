@@ -1,12 +1,14 @@
-# CoolEffNet
+# CoolEffNet - Predicting Film Cooling Effectiveness with Neural Networks
 
 CoolEffNet is a set of tools written in Python for predicting film cooling effectiveness
 in flat plate experiments, using a technique called
 [Bayesian Neural Network Ensembles](https://doi.org/10.48550/arXiv.1811.12188).
-A set of pre-trained ensembles are included along with a tool to train network ensembles on the user's own data and save them.
-The mean prediction of the data has 19-36% less root-mean-squared error compared to
+A set of pre-trained ensembles are included along with a tool to train your own network ensembles on custom data and save them.
+The mean prediction of the included networks have 19-36% less root-mean-squared error compared to
 using Colban's and Baldauf's correlations over the same dataset.
 A technical report detailing the model and its advantages will be hopefully available in time.
+
+## Links
 
 - [Installation](#installation)
 - [Usage](#usage)
@@ -17,17 +19,17 @@ A technical report detailing the model and its advantages will be hopefully avai
 
 ## Installation
 
-Installation is via `pip`.
+Installation is done via `pip`.
 Using your favourite shell, enter: 
 
 `pip install cooleffnet`
 
 ## Usage
 
-`cooleffnet` is the predictor tool, and `cooleffnet-train` is capable of training ensembles.
+`cooleffnet` is the predictor tool, and `cooleffnet-train` is the tool for training ensembles.
 Both have large variety of options and an extensive help accessible via the `-h` and `--help` options.
 
-### Examples from the command-line
+### Examples using the command-line
 
 #### CoolEffNet
 
@@ -47,11 +49,11 @@ This shows that the default model ("general") uses an ensemble of 10 Bayesian ne
 each with a single hidden layer of 100 nodes and uses a noise variance of 3.24E-4.
 It expects 6 input parameters: area ratio, width over pitch, pitch over diameter, blowing ratio, impulse ratio and 
 advective capacity ratio. 
-Refer to the [full list of what each flow parameter](#possible-parameters) means for more details.
+Refer to the [full list of what each flow parameter means](#possible-parameters) for more details.
 
 Now that we know which parameters the model requires, we can use it to predict the film cooling effectiveness.
 
-##### Specific x values
+##### Using specific $x/D$ values
 Assume we are interested in the $x/D$ of 1, 2, 3, 4, 5 and 10 and the parameters
 mentioned above are all 1.0 (this is to provide a simple example, and may not represent a real case)
 
@@ -69,10 +71,10 @@ x/D       Film eff. CI lower  CI upper
 The second column shows the mean prediction, while the third and fourth 
 show the lower and upper boundary of the 95% confidence interval.
 
-##### Equally spaced x values
+##### Equally spaced $x/D$ values
 If you require results at many $x/D$ values then the above approach may be cumbersome.
 You can use the `--x-lin START,STOP,NUM` option which inputs `NUM` $x/D$ values between `START` and 
-`STOP` similarly to the `linspace()` function of NumPy or PyTorch. 
+`STOP` similarly to how the `linspace()` function of NumPy or PyTorch works. 
 Say we are interested in 10 points 1.0 $\leq x/D \leq$ 10.0.
 ```bash
 $ cooleffnet --x-lin=1.0,10.0,10 --params=1.0,1.0,1.0,1.0,1.0,1.0
@@ -102,7 +104,7 @@ x/D       Film eff. CI lower  CI upper
 1.0000    0.3889    0.0000    0.8590
 ```
 The other pre-trained network available is called `specific` as it uses more input parameters.
-To see which ones run `cooleffnet --info specific`
+To see which ones, run  `cooleffnet --info specific`
 
 For a user-made model you could run:
 ```bash
@@ -195,7 +197,7 @@ There are more options available, for details either run `cooleffnet --help` or 
 
 ### Examples using Python code
 
-The package also functions as a Python library and can film cooling predictions can be 
+The package also functions as a Python library and  film cooling predictions can be 
 embedded inside Python code.
 
 Using the general model: 
@@ -281,7 +283,7 @@ data files are structured please see the existing examples in the folder and the
 CoolEffNet-Train can be launched with `cooleffnet-train`. You likely need to specify
 the directory where your measurement JSON files are located using the `-d DIRECTORY` option.
 The default directory is the current working directory.
-Then CoolEffNet-Train can do three kinds of training, each with their flag. If multiple are specified
+Then CoolEffNet-Train can do three kinds of training, each has its own option. If multiple are specified
 they are run one after another
 * `--export` - Trains the ensemble using the entire dataset and saves the network to a file
 * `--cv [K]` - `K`-fold cross validation on the entire dataset. Default `K` is 5. 
@@ -291,7 +293,7 @@ Then the parameters to be used in the input layer need to be given using the
 `--params PARAMS` argument. Refer to the [full list of possible parameters.](#possible-parameters)
 A log file about the training is saved about each training run for future reference.
 There are various options to configure the training process, though the defaults are reasonable.
-For details refer to [Options](#cooleffnet-train-1)
+For details refer to the [full list of options.](#cooleffnet-train-1)
 ##### Creating a model to use in `cooleffnet`
 
 Assume all measurements are in the `data/` folder. 
@@ -349,6 +351,8 @@ Running for 100 epochs, with network layers: [100, 1]
 
 Training on all data in dataset to export & save model
 Training model #1
+
+[...]
 ```
 This uses a learning rate of 0.0001 over 100 epochs with a batch size of 150.
 The parameters used are the area ratio, the density ratio, the momentum flux ratio
@@ -378,7 +382,7 @@ Training model #10
 Training model #1
 Training model #2
 
-...
+[...]
 
 100/05 nodes, avg. training score: 0.0331 σ = 0.00116, avg. test score: 0.059 σ = 0.0172
 All training scores: [0.033409234136343, 0.03181647136807442, 0.03456484526395798, 0.03408440202474594, 0.03122926503419876]
@@ -397,32 +401,33 @@ and more. Refer to the [full list of options](#cooleffnet-train-1) for more deta
 
 ### Possible parameters
 
-| Parameter short name | Expression                                         | Description                                                   |
-|----------------------|----------------------------------------------------|---------------------------------------------------------------|
-| `AR`                 | $AR$                                               | Exit-to-inlet cross-sectional area ratio for coolant          |
-| `W_D`                | $\frac{W}{D}$                                      | Hole width to diameter ratio (coverage ratio                  |
-| `W_P`                | $\frac{W}{P}$                                      | Hole width to hole pitch ratio                                |
-| `P_D`                | $\frac{P}{D}$                                      | Hole pitch to diameter ratio                                  |
-| `L_D`                | $\frac{L}{D}$                                      | Coolant hole centerline length to hole diameter ratio         |
-| `Alpha`              | $\alpha$                                           | Inclination angle of coolant hole, see diagram below          |
-| `Beta`               | $\beta$                                            | Orientation/compound angle of coolant hole, see diagram below |
-| `Re`                 | $Re$                                               | Coolant Reynold number                                        |
-| `Ma`                 | $Ma$                                               | Coolant Mach number                                           |
-| `Tu`                 | $Tu$                                               | Mainstream  turbulence intensity                              |
-| `VR`                 | $VR$                                               | Coolant to mainstream velocity ratio                          |
-| `BR`                 | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty}$     | Blowing ratio                                                 |
-| `BR_normal`          | $BR \sin(\alpha)$                                  | Normal component of the blowing ratio"                        |
-| `BR_perpendicular`   | $BR \sin(\beta)$                                   | Perpendicular component of blowing ratio"                     |
-| `DR`                 | $DR = \frac{\rho_c}{\rho_\infty}$                  | Coolant-to-mainstream density ratio"                          |
-| `IR`                 | $IR = \frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ | Coolant-to-mainstream momentum flux ratio"                    |
-| `IR_eff`             | $IR/AR^2$                                          | Effective coolant-to-mainstream momentum flux ratio"          |
-| `IR_normal`          | $IR \sin(\alpha)$                                  | Normal component of the momentum flux ratio"                  |
-| `IR_perpendicular`   | $IR \sin(\beta)$                                   | Perpendicular component of the momentum flux ratio"           |
-| `ER`                 | $BR \frac{c_{p,\infty}}{c_{p,\infty}}$             | Coolant-to-mainstream advective capacity ratio"               |
-| `TR`                 | $\frac{T_c}{T_\infty}$                             | Coolant-to-mainstream temperature ratio"                      |
-| `Single_hole`        | -                                                  | 1 if single hole, -1 if multiple holes                        |
+| Parameter short name | Expression                                        | Description                                                    |
+|----------------------|---------------------------------------------------|----------------------------------------------------------------|
+| `AR`                 | $AR$                                              | Exit-to-inlet cross-sectional area ratio for coolant           |
+| `W_D`                | $\frac{W}{D}$                                     | Hole width to diameter ratio (coverage ratio)                  |
+| `W_P`                | $\frac{W}{P}$                                     | Hole width to hole pitch ratio                                 |
+| `P_D`                | $\frac{P}{D}$                                     | Hole pitch to diameter ratio                                   |
+| `L_D`                | $\frac{L}{D}$                                     | Coolant hole centerline length to hole diameter ratio          |
+| `Alpha`              | $\alpha$                                          | Inclination angle of coolant hole, see diagram below.          |
+| `Beta`               | $\beta$                                           | Orientation/compound angle of coolant hole, see diagram below. |
+| `Re`                 | $Re$                                              | Coolant Reynold number                                         |
+| `Ma`                 | $Ma$                                              | Coolant Mach number                                            |
+| `Tu`                 | $Tu$                                              | Mainstream  turbulence intensity                               |
+| `VR`                 | $VR$                                              | Coolant-to-mainstream velocity ratio                           |
+| `BR`                 | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty}$    | Blowing ratio                                                  |
+| `BR_normal`          | $BR \sin(\alpha)$                                 | Normal component of the blowing ratio"                         |
+| `BR_perpendicular`   | $BR \sin(\beta)$                                  | Perpendicular component of blowing ratio"                      |
+| `DR`                 | $DR = \frac{\rho_c}{\rho_\infty}$                 | Coolant-to-mainstream density ratio"                           |
+| `IR`                 | $IR = \frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ | Coolant-to-mainstream momentum flux ratio"                     |
+| `IR_eff`             | $IR/AR^2$                                         | Effective coolant-to-mainstream momentum flux ratio"           |
+| `IR_normal`          | $IR \sin(\alpha)$                                 | Normal component of the momentum flux ratio"                   |
+| `IR_perpendicular`   | $IR \sin(\beta)$                                  | Perpendicular component of the momentum flux ratio"            |
+| `ER`                 | $BR \frac{c_{p,c}}{c_{p,\infty}}$                 | Coolant-to-mainstream advective capacity ratio"                |
+| `TR`                 | $\frac{T_c}{T_\infty}$                            | Coolant-to-mainstream temperature ratio"                       |
+| `Single_hole`        | -                                                 | 1 if single hole, -1 if multiple holes                         |
 
 Reference for geometric parameters:
+
 ![geometry definitions](geom.svg)
 
 ### Options
@@ -459,9 +464,17 @@ film effectiveness well in cross-validation tests.
 The slightly better `specific` model is also available, but it may not generalise well to
 inputs outside the training range.
 Alternatively user-generated models from `cooleffnet-train` may be used well by specifying the path.
-See the [examples](#examples). 
+See the [examples](#examples-using-the-command-line). 
 
 #### `cooleffnet-train`
+
+##### Usage
+
+While all options are optional due to the default values, but in practice
+you would run it someway like this: 
+```bash
+cooleffnet-train -d=<database dir> [--export | --holdout | --cv [CV]] [options] 
+```
 
 | Option                          | Description                                                                                                                                                                       |
 |---------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
