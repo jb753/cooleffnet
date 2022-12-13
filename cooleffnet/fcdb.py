@@ -574,7 +574,7 @@ class Figure:
         self.__parameters['W_P'] = to_array(W_D / self.__P_D, max_length)
         self.__parameters['L_D'] = to_array(self.__L_D, max_length)
         self.__parameters['Alpha'] = to_array(self.__alpha, max_length)
-        self.__parameters['Beta'] = to_array(np.sin(np.radians(self.__beta)), max_length)
+        self.__parameters['Beta'] = to_array(self.__beta, max_length)
         self.__parameters['Re'] = to_array(self.get_reynolds(), max_length)
         self.__parameters['Ma'] = to_array(self.get_mach(), max_length)
         self.__parameters['Tu'] = to_array(self.__Tu, max_length)

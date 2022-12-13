@@ -8,6 +8,13 @@ The mean prediction of the data has 19-36% less root-mean-squared error compared
 using Colban's and Baldauf's correlations over the same dataset.
 A technical report detailing the model and its advantages will be hopefully available in time.
 
+- [Installation](#installation)
+- [Usage](#usage)
+    - [Examples from the command-line](#examples-from-the-command-line)
+    - [Examples using Python code](#examples-using-python-code)
+    - [Possible parameters](#possible-parameters)
+    - [Options](#options)
+
 ## Installation
 
 Installation is via `pip`.
@@ -24,7 +31,7 @@ Both have large variety of options and an extensive help accessible via the `-h`
 
 #### CoolEffNet
 
-Get information about the default model
+First let us get some information about the default model.
 
 ```bash
 $ cooleffnet --info
@@ -63,9 +70,9 @@ The second column shows the mean prediction, while the third and fourth
 show the lower and upper boundary of the 95% confidence interval.
 
 ##### Equally spaced x values
-If we require results at a lot $x/D$ values the above approach may be cumbersome.
-We can use the `--x-lin START,STOP,NUM` option which inputs `NUM` $x/D$ values between `START` and 
-`STOP` similarly to the `linspace()` function of NumPy or Torch. 
+If you require results at many $x/D$ values then the above approach may be cumbersome.
+You can use the `--x-lin START,STOP,NUM` option which inputs `NUM` $x/D$ values between `START` and 
+`STOP` similarly to the `linspace()` function of NumPy or PyTorch. 
 Say we are interested in 10 points 1.0 $\leq x/D \leq$ 10.0.
 ```bash
 $ cooleffnet --x-lin=1.0,10.0,10 --params=1.0,1.0,1.0,1.0,1.0,1.0
@@ -254,30 +261,30 @@ Please refer to the docstrings in `cooleffnet/predictor.py` for more details.
 
 ### Possible parameters
 
-| Parameter short name | Definition                                                                               |
-|---------------------|------------------------------------------------------------------------------------------|
-| `AR`                | Exit-to-inlet cross-sectional area ratio for coolant                                     |
-| `W_D`               | $\frac{W}{D}$ Hole width to diameter ratio (coverage ratio                               |
-| `W_P`               | $\frac{W}{P}$ Hole width to hole pitch ratio                                             |
-| `P_D`               | $\frac{P}{D}$ Hole pitch to diameter ratio                                               |
-| `L_D`               | $\frac{L}{D}$ Coolant hole centerline length to hole diameter ratio                      |
-| `alpha`             | $\alpha$ Inclination angle of coolant hole, see diagram below                            |
-| `beta`              | $\beta$ Orientation/compound angle of coolant hole, see diagram below                    |
-| `Re`                | $Re$ Coolant Reynold number                                                              |
-| `Ma`                | $Ma$ Coolant Mach number                                                                 |
-| `Tu`                | $Tu$ Mainstream ***- check  turbulence intensity                                         |
-| `VR`                | $VR$ Coolant to mainstream velocity ratio                                                |
-| `BR`                | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty$ Blowing ratio                              |
-| `BR_normal`         | $BR \sin(\alpha)$ Normal component of the blowing ratio"                                 |
-| `BR_perpendicular`  | $BR \sin(\beta)$ Perpendicular component of blowing ratio"                               |
-| `DR`                | $\frac{\rho_c}{\rho_\infty}$ Coolant-to-mainstream density ratio"                        |
-| `IR`                | $\frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ Coolant-to-mainstream momentum flux ratio" |
-| `IR_eff`            | $IR / AR^2$ Effective coolant-to-mainstream momentum flux ratio"                         |
-| `IR_normal`         | $IR \sin(\alpha)$ Normal component of the momentum flux ratio"                           |
-| `IR_perpendicular`  | $IR \sin(\beta)$ Perpendicular component of the momentum flux ratio"                     |
-| `ER`                | $ BR \frac{c_{p,c}}{c_{p,\infty}} Coolant-to-mainstream advective capacity ratio"        |
-| `TR`                | $ \frac{T_c}{T_\infty} Coolant-to-mainstream temperature ratio"                          |
-| `Single_hole`       | 1 if single hole, -1 if multiple holes                                                   |
+| Parameter short name | Expression | Description                                                  |
+|----------------------|----------------|--------------------------------------------------------------|
+| `AR`                 | $AR$ | Exit-to-inlet cross-sectional area ratio for coolant         |
+| `W_D`                | $\frac{W}{D}$ | Hole width to diameter ratio (coverage ratio                 |
+| `W_P`                | $\frac{W}{P}$ | Hole width to hole pitch ratio                               |
+| `P_D`                | $\frac{P}{D}$ | Hole pitch to diameter ratio                                 |
+| `L_D`                | $\frac{L}{D}$ | Coolant hole centerline length to hole diameter ratio        |
+| `Alpha`              | $\alpha$ | Inclination angle of coolant hole, see diagram below         |
+| `Beta`               | $\beta$ | Orientation/compound angle of coolant hole, see diagram below |
+| `Re`                 | $Re$ | Coolant Reynold number                                       |
+| `Ma`                 | $Ma$ | Coolant Mach number                                          |
+| `Tu`                 | $Tu$ | Mainstream  turbulence intensity                             |
+| `VR`                 | $VR$ | Coolant to mainstream velocity ratio                         |
+| `BR`                 | $BR = \frac{\rho_c V_c}{\rho_\infty V_\infty}$ | Blowing ratio                                                |
+| `BR_normal`          | $BR \sin(\alpha)$ | Normal component of the blowing ratio"                       |
+| `BR_perpendicular`   | $BR \sin(\beta)$ | Perpendicular component of blowing ratio"                    |
+| `DR`                 | $\frac{\rho_c}{\rho_\infty}$ | Coolant-to-mainstream density ratio"                         |
+| `IR`                 | $\frac{\rho_c V^2_c}{\rho_\infty V^2_\infty}$ | Coolant-to-mainstream momentum flux ratio"                   |
+| `IR_eff`             | $IR / AR^2$ | Effective coolant-to-mainstream momentum flux ratio"         |
+| `IR_normal`          | $IR \sin(\alpha)$ | Normal component of the momentum flux ratio"                 |
+| `IR_perpendicular`   | $IR \sin(\beta)$ | Perpendicular component of the momentum flux ratio"          |
+| `ER`                 | $BR \frac{c_{p,c}}{c_{p,\infty}} $  Coolant-to-mainstream advective capacity ratio"        |
+| `TR`                 | $ \frac{T_c}{T_\infty} $ | Coolant-to-mainstream temperature ratio"                     |
+| `Single_hole`        | - | 1 if single hole, -1 if multiple holes                       |
 
 ### Options
 
@@ -302,7 +309,7 @@ cooleffnet [required named arguments] [options] [model name/file]
 | `--info` | Shows information about the model, like how many and what kind of flow parameters it requires                                                                                                                       |
 | `--norm-params` | Some custom models may require extra parameters not included in `--params` for transforrmation of $x/D$ values                                                                                                      |
 | `--plot` | Plot result using MatPlotLib                                                                                                                                                                                        |
-| `--format={json,csv,plain} | Sets the output format to JSON, CSV or plaintext                                                                                                                                                                    |
+| `--format={json,csv,plain}` | Sets the output format to JSON, CSV or plaintext                                                                                                                                                                    |
 | `-o OUTPUT`, `--output OUTPUT` | Save output to file instead of printing it in the shell                                                                                                                                                             |
 | ``-no-ci`` | Removes the 95% confidence interval from the output                                                                                                                                                                 |
 | `--no-clip` | The 95% confidence interval, when confidence is low, may occasionally be outside the range of [0.0, 1.0]. As these values are not physical they are clipped to this range by default. Use this option to avoid that |
