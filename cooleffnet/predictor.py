@@ -1,7 +1,7 @@
 import pkgutil
 import io
 from pathlib import Path
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 import torch
 
@@ -11,7 +11,7 @@ from cooleffnet.util import CustomStandardScaler
 
 class CoolingPredictor:
 
-    def __init__(self, model: Path | str = "general"):
+    def __init__(self, model: Union[Path, str] = "general"):
         self.__model_path = None
         if type(model) is str:
             if model in CoolingPredictor.get_pretrained_model_list():
@@ -58,7 +58,7 @@ class CoolingPredictor:
                 x_d_val: torch.Tensor,
                 norm_values: Sequence[float] = None,
                 confidence: bool = True,
-                clamp: bool = True) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]] | torch.Tensor:
+                clamp: bool = True) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]], torch.Tensor]:
         """
         Predicts from a pretrained network
         Parameters

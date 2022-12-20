@@ -18,7 +18,7 @@ classifiers = [
 repository = "https://github.com/jb753/fcdb"
 
 [tool.poetry.dependencies]
-python = "^3.6"
+python = ">=3.8"
 numpy = "~1.23.1"
 CoolProp = "~6.4.1"
 torch = "~1.12.0"

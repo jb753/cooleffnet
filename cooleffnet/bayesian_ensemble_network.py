@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple, Dict, List
+from typing import Sequence, Tuple, Dict, List, Union
 
 import torch
 from captum.attr import DeepLift
@@ -160,12 +160,12 @@ class BayesianNetworkEnsemble:
         return len(self.models)
 
     def __call__(self, input: torch.Tensor, return_predictions: bool = False) \
-            -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         return self.predict(input, return_predictions)
 
     # TODO: Add cutoff to keep mean and 95% confidence interval between 0 and 1
     def predict(self, input: torch.Tensor, return_predictions: bool = False)\
-            -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Predicts
         Parameters
@@ -192,7 +192,7 @@ class BayesianNetworkEnsemble:
                 return pred_mean, pred_std
 
     def importance(self, test: torch.Tensor, relative: bool = False, return_std: bool = False) \
-            -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+            -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """
         Returns average importance of input features
         Parameters
